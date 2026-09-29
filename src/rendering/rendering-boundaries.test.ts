@@ -63,31 +63,58 @@ describe("rendering layer boundaries", () => {
   it("never imports the application layer", () => {
     for (const file of sourceFiles("rendering")) {
       expect(importsOf(file).filter((s) => s.startsWith("@/app")), file).toEqual([]);
-      expect(read(file), file).not.toMatch(/\buse(ExperienceSnapshot|ExperienceRuntime)\b/);
+      expect(read(file), file).not.toMatch(
+        /\buse(ExperienceSnapshot|ExperienceRuntime|ExperienceScenes)\b/,
+      );
     }
   });
 
-  it("depends on the Experience Engine only through the layer state type", () => {
-    const engineImports = sourceFiles("rendering")
-      .filter((file) => !file.endsWith(".test.ts"))
-      .flatMap((file) => importsOf(file).filter((s) => s.startsWith("@/experience")));
-    expect([...new Set(engineImports)]).toEqual(["@/experience/layers/layer-state"]);
-    for (const file of sourceFiles("rendering").filter((f) => !f.endsWith(".test.ts"))) {
-      expect(read(file), file).not.toMatch(/^import\s+(?!type\b).*["']@\/experience/m);
-    }
-  });
-
-  it("receives only layers and keeps the camera technical, without navigation or selection", () => {
-    const canvas = read("rendering/canvas/experience-canvas.tsx");
-    expect(canvas).toMatch(
-      /export interface ExperienceCanvasProps \{[^}]*readonly layers: LayerControllerState;\s*\}/,
+  it("depends on the Experience Engine only through the layer state and scene definition types", () => {
+    const productionFiles = sourceFiles("rendering").filter((file) => !file.endsWith(".test.ts"));
+    const engineImports = productionFiles.flatMap((file) =>
+      importsOf(file).filter((s) => s.startsWith("@/experience") || s.startsWith("@/biology")),
     );
+    expect([...new Set(engineImports)].sort()).toEqual([
+      "@/experience/layers/layer-state",
+      "@/experience/scenes/scene-definition",
+    ]);
+    for (const file of productionFiles) {
+      expect(read(file), file).not.toMatch(/^import\s+(?!type\b).*["']@\/experience/m);
+      expect(read(file), file).not.toMatch(
+        /\b(SceneRegistry|BiologicalGraph|NavigationController|ApplicationExperience)\b/,
+      );
+    }
+  });
+
+  it("receives only the active scene and the layers, keeping the camera technical", () => {
+    const canvas = read("rendering/canvas/experience-canvas.tsx");
+    const props = canvas.match(/export interface ExperienceCanvasProps \{([^}]*)\}/)?.[1] ?? "";
+    expect([...props.matchAll(/readonly (\w+):/g)].map((m) => m[1])).toEqual(["scene", "layers"]);
+    expect(props).toMatch(/readonly scene: SceneDefinition \| undefined;/);
+    expect(props).toMatch(/readonly layers: LayerControllerState;/);
     expect(canvas).toMatch(/camera=\{\{ position: \[2\.5, 2, 3\.5\], fov: 50 \}\}/);
     for (const file of sourceFiles("rendering").filter((f) => !f.endsWith(".test.ts"))) {
       expect(read(file), file).not.toMatch(
         /\b(useFrame|navigation|selection|currentNode|selectedNodeId|CameraState|lookAt|ExperienceSnapshot|ExperienceRuntime)\b/,
       );
     }
+  });
+
+  it("mounts the probe and the SceneManager inside the Canvas, leaving layer groups to the SceneManager", () => {
+    const canvas = read("rendering/canvas/experience-canvas.tsx");
+    const inside = canvas.match(/<Canvas[^>]*>([\s\S]*)<\/Canvas>/)?.[1] ?? "";
+    expect(inside).toMatch(/<RenderingProbe \/>/);
+    expect(inside).toMatch(/<SceneManager scene=\{scene\} layers=\{layers\} \/>/);
+    expect(canvas).not.toMatch(/<LayerGroups\b/);
+    expect(read("rendering/scenes/scene-manager.tsx")).toMatch(/<LayerGroups layers=\{layers\} \/>/);
+  });
+
+  it("keeps the SceneManager structural: no camera, assets, capabilities or invented content", () => {
+    const manager = read("rendering/scenes/scene-manager.tsx");
+    expect(manager).not.toMatch(
+      /\b(useThree|useFrame|useLoader|Suspense|mesh|Material|Geometry|lookAt|scene\.camera|scene\.assets|scene\.capabilities)\b/,
+    );
+    expect(manager).not.toMatch(/RenderingProbe/);
   });
 
   it("keeps the rendering probe free of the engine, animation and asset loading", () => {

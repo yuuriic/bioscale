@@ -146,17 +146,19 @@ controllers.
 
 ```text
 src/rendering/
-├── canvas/experience-canvas.tsx   Canvas R3F persistente, único Client Component; recebe layers por props
+├── canvas/experience-canvas.tsx   Canvas R3F persistente, único Client Component; recebe cena ativa e layers por props
 ├── debug/rendering-probe.tsx      cubo técnico temporário, sem conteúdo científico
 ├── layers/layer-groups.tsx        um grupo de cena por VisualLayer, com visibilidade derivada
 ├── layers/layer-visibility.ts     regra pura de visibilidade (visível e isolamento)
 ├── layers/layer-visibility.test.ts
+├── scenes/scene-manager.tsx       grupo da cena ativa (por nodeId) com os LayerGroups; nada sem cena
+├── scenes/scene-manager.test.ts
 └── rendering-boundaries.test.ts   fronteiras estruturais da camada
 ```
 
 `ExperienceCanvas` é montado uma única vez pela `ExperienceRenderingBridge`
 (`src/app`), que o layout monta (ARCHITECTURE.md §17.1 e §17.4). A câmera é
-técnica; o rendering recebe apenas o estado de layers. As dependências de rendering são `three` e `@react-three/fiber`
+técnica; o rendering recebe apenas a cena ativa e o estado de layers. As dependências de rendering são `three` e `@react-three/fiber`
 (`@types/three` em desenvolvimento, pois `three` não publica tipos próprios).
 
 ## Composição da aplicação
@@ -167,7 +169,7 @@ src/app/
 ├── experience-runtime-provider.tsx   Client Component: Context interno com ApplicationExperience (runtime + scenes); useExperienceRuntime e useExperienceScenes
 ├── experience-snapshot-reader.ts     estabiliza a identidade do snapshot para o React, sem React
 ├── use-experience-snapshot.ts        useExperienceSnapshot: leitura reativa via useSyncExternalStore
-├── experience-rendering-bridge.tsx   Client Component: injeta as layers do snapshot no ExperienceCanvas
+├── experience-rendering-bridge.tsx   Client Component: deriva a cena ativa e injeta cena e layers no ExperienceCanvas
 ├── experience-composition.test.ts    Provider, hook e fronteiras da composição
 ├── experience-snapshot-bridge.test.ts reader, hook, SSR e estrutura da ponte
 └── experience-rendering-bridge.test.ts props injetadas no Canvas e estrutura da ponte

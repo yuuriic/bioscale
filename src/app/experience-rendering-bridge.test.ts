@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SceneNotAvailableError } from "@/experience/engine/experience-controller";
 import type { ExperienceCanvasProps } from "@/rendering/canvas/experience-canvas";
+import type { ApplicationExperience } from "./experience-config";
 import { ExperienceRenderingBridge } from "./experience-rendering-bridge";
 import { ExperienceRuntimeProvider } from "./experience-runtime-provider";
 
@@ -17,23 +19,74 @@ vi.mock("@/rendering/canvas/experience-canvas", () => ({
   },
 }));
 
+// A composição real, opcionalmente levada a um nó por navegação direta, o
+// caminho real pelo qual `currentNode` pode ficar sem cena.
+const composition = vi.hoisted(() => ({
+  navigateTo: undefined as string | undefined,
+  last: undefined as ApplicationExperience | undefined,
+}));
+vi.mock("./experience-config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./experience-config")>();
+  return {
+    ...actual,
+    createApplicationExperience: () => {
+      const experience = actual.createApplicationExperience();
+      if (composition.navigateTo !== undefined) {
+        experience.runtime.navigation.navigate(composition.navigateTo);
+      }
+      composition.last = experience;
+      return experience;
+    },
+  };
+});
+
+function renderBridge(): ExperienceCanvasProps | undefined {
+  renderToString(createElement(ExperienceRuntimeProvider, null, createElement(ExperienceRenderingBridge)));
+  expect(received).toHaveLength(1);
+  return received[0];
+}
+
+beforeEach(() => {
+  received.length = 0;
+  composition.navigateTo = undefined;
+  composition.last = undefined;
+});
+
 describe("ExperienceRenderingBridge", () => {
-  it("passes only the layers of the experience snapshot to the Canvas", () => {
-    received.length = 0;
+  it("passes the active scene and the layers, exactly as the registry and the snapshot hold them", () => {
+    const props = renderBridge();
+    const experience = composition.last!;
 
-    renderToString(createElement(ExperienceRuntimeProvider, null, createElement(ExperienceRenderingBridge)));
-
-    expect(received).toHaveLength(1);
-    const [props] = received;
-    expect(Object.keys(props ?? {})).toEqual(["layers"]);
+    expect(Object.keys(props ?? {}).sort()).toEqual(["layers", "scene"]);
+    expect(props?.scene?.nodeId).toBe("human");
+    // A mesma referência do registry: sem cópia, view nem memoização.
+    expect(props?.scene).toBe(experience.scenes.getScene("human"));
+    expect(Object.isFrozen(props?.scene)).toBe(true);
+    // O estado imutável do LayerController, não uma cópia.
+    expect(props?.layers).toBe(experience.runtime.layers.getState());
     expect(props?.layers).toEqual({ layers: [] });
-    // É o estado imutável do LayerController, não uma cópia.
-    expect(Object.isFrozen(props?.layers)).toBe(true);
+  });
+
+  it("passes an undefined scene, without throwing, when the current node has no scene", () => {
+    composition.navigateTo = "brain";
+
+    let props: ExperienceCanvasProps | undefined;
+    expect(() => {
+      props = renderBridge();
+    }).not.toThrow();
+    const experience = composition.last!;
+
+    expect(experience.runtime.navigation.getState().currentNode).toBe("brain");
+    expect(experience.scenes.getScene("brain")).toBeUndefined();
+    expect(() => experience.runtime.experience.enter("brain")).toThrow(SceneNotAvailableError);
+    expect("scene" in (props ?? {})).toBe(true);
+    expect(props?.scene).toBeUndefined();
+    expect(props?.layers).toBe(experience.runtime.layers.getState());
   });
 
   it("requires the ExperienceRuntimeProvider", () => {
     expect(() => renderToString(createElement(ExperienceRenderingBridge))).toThrow(
-      "useExperienceRuntime must be used within an ExperienceRuntimeProvider.",
+      /must be used within an ExperienceRuntimeProvider/,
     );
   });
 });
@@ -44,15 +97,18 @@ describe("rendering bridge structure", () => {
     "utf8",
   );
 
-  it("lives in the application layer, reads the snapshot and forwards only layers", () => {
+  it("lives in the application layer and derives the active scene directly", () => {
     expect(source).toMatch(/^"use client";/);
-    expect(source).toMatch(/const \{ layers \} = useExperienceSnapshot\(\);/);
-    expect(source).toMatch(/return <ExperienceCanvas layers=\{layers\} \/>;/);
+    expect(source).toMatch(/const \{ navigation, layers \} = useExperienceSnapshot\(\);/);
+    expect(source).toMatch(
+      /const scene = useExperienceScenes\(\)\.getScene\(navigation\.currentNode\);/,
+    );
+    expect(source).toMatch(/return <ExperienceCanvas scene=\{scene\} layers=\{layers\} \/>;/);
   });
 
-  it("does not connect camera, navigation or selection, nor keep its own state", () => {
+  it("does not connect camera or selection, nor keep state, memoize or synchronize", () => {
     expect(source).not.toMatch(
-      /\b(camera|navigation|selection|useState|useEffect|useReducer|useFrame|window)\b/,
+      /\b(camera|selection|useState|useEffect|useReducer|useMemo|useCallback|useFrame|window)\b/,
     );
   });
 });

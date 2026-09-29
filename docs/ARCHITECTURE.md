@@ -1031,7 +1031,7 @@ rendering  → experience     permitido
 experience -X→ rendering    proibido (ESLint e testes de fronteira)
 ```
 
-- `ExperienceCanvas` é o Canvas React Three Fiber persistente. Existe uma única instância, montada pela ponte da aplicação (§17.4) dentro do layout raiz, que não é remontado entre páginas. Cenas futuras serão renderizadas dentro dele; nenhum BiologicalNode ou SceneDefinition cria Canvas próprio.
+- `ExperienceCanvas` é o Canvas React Three Fiber persistente. Existe uma única instância, montada pela ponte da aplicação (§17.4) dentro do layout raiz, que não é remontado entre páginas. As cenas são montadas dentro dele pelo SceneManager (§18); nenhum BiologicalNode ou SceneDefinition cria Canvas próprio.
 - `ExperienceCanvas` é o único Client Component da camada; o layout e as páginas continuam Server Components. O Canvas é pré-renderizado no servidor sem carregamento dinâmico: o contexto WebGL é criado apenas no navegador.
 - `RenderingProbe` é um objeto técnico temporário (um cubo com iluminação mínima) que comprova o pipeline Next → React → R3F → Three → WebGL. Não é científico e será removido quando existirem cenas reais.
 - A câmera do Canvas é apenas técnica, para tornar o probe visível. Ainda não é controlada pelo CameraController.
@@ -1085,24 +1085,28 @@ reader.getSnapshot ─────────┘   leitura estável
 
 ## 17.4 Application → Rendering Bridge
 
-O rendering não conhece a aplicação. A ponte fica em `src/app`, lê o snapshot e injeta no rendering apenas o estado que ele interpreta:
+O rendering não conhece a aplicação. A ponte fica em `src/app`, lê o snapshot, deriva a cena ativa e injeta no rendering apenas o que ele interpreta:
 
 ```text
-ExperienceRuntime ──► useExperienceSnapshot() ──► ExperienceRenderingBridge (src/app)
-                                                        │  layers
+ExperienceRuntime ──► useExperienceSnapshot() ──┐
+useExperienceScenes() ──────────────────────────┴─► ExperienceRenderingBridge (src/app)
+                                                        │  scene = getScene(currentNode), layers
                                                         ▼
                                                   ExperienceCanvas (src/rendering)
-                                                        └── LayerGroups
+                                                        ├── RenderingProbe
+                                                        └── SceneManager
+                                                              └── grupo da cena → LayerGroups
 ```
 
 - `ExperienceRenderingBridge` é um Client Component da aplicação e o primeiro consumidor real de `useExperienceSnapshot`. O layout (Server Component) monta a ponte dentro do `ExperienceRuntimeProvider`, ao lado do conteúdo DOM.
-- O primeiro contrato conectado é o de layers: `ExperienceCanvas` recebe `layers: LayerControllerState`, o estado imutável do LayerController, sem cópia nem estado local. O rendering importa apenas esse tipo do Experience Engine (`rendering → experience`) e nunca importa `src/app`.
-- O Canvas não recebe o runtime, o snapshot completo nem controllers.
+- `ExperienceCanvas` recebe `scene: SceneDefinition | undefined` e `layers: LayerControllerState`. A ponte deriva a cena ativa diretamente, com `useExperienceScenes().getScene(snapshot.navigation.currentNode)`: é a referência congelada do registry, estável enquanto o nó não muda, sem cópia, view nem memoização. `layers` é o estado imutável do LayerController, sem cópia nem estado local. O rendering importa do Experience Engine apenas esses dois tipos (`rendering → experience`) e nunca importa `src/app`.
+- `scene === undefined` significa somente que não há representação visual registrada para o nó atual. Não significa carregamento, erro de asset, transição nem ocultação.
+- O Canvas não recebe o runtime, o registry, o grafo, o snapshot completo nem controllers.
 - `LayerGroups` cria um grupo de cena vazio por VisualLayer, na ordem declarada. Uma layer é renderizada se estiver visível e, havendo isolamento, for a isolada; isolar uma layer oculta não a torna visível. A transparência lógica ainda não é interpretada, porque os grupos não têm materiais. Os grupos receberão o conteúdo dos assets de cada layer.
 - A cena técnica de `human` não tem layers, então nenhum grupo existe hoje; nenhuma layer científica foi inventada, e o `RenderingProbe` não mudou.
-- Câmera, navegação e seleção não atravessam a fronteira: a câmera do Canvas continua técnica, não há SceneManager, modelos nem highlight.
+- Da navegação, só a identidade da cena ativa atravessa a fronteira. Câmera e seleção não atravessam: a câmera do Canvas continua técnica, e não há modelos nem highlight.
 - Não há store duplicada: as props vêm diretamente do snapshot React.
-- O bridge usa o snapshot completo e, portanto, renderiza de novo quando qualquer parte muda, mesmo passando apenas layers; a prop `layers` mantém a referência quando as layers não mudam. Isso é aceitável temporariamente. Estratégias para estado de alta frequência (como câmera) e leituras mais granulares serão definidas separadamente, guiadas por profiling e pelos requisitos do rendering.
+- O bridge usa o snapshot completo e, portanto, renderiza de novo quando qualquer parte muda, mesmo passando apenas cena e layers; as props `scene` e `layers` mantêm a referência quando não mudam. Isso é aceitável temporariamente. Estratégias para estado de alta frequência (como câmera) e leituras mais granulares serão definidas separadamente, guiadas por profiling e pelos requisitos do rendering.
 
 ## 17.5 Experience → Rendering State Ownership
 
@@ -1126,7 +1130,7 @@ Valores intermediários não são adicionados ao Engine apenas para animar frame
 ### Classificação
 
 - **Layers — DECLARATIVE.** Fonte da verdade: LayerController. Fluxo atual: `LayerController → ExperienceSnapshot → useExperienceSnapshot → ExperienceRenderingBridge → ExperienceCanvas → LayerGroups` (§17.4). Visibilidade e isolamento são declarativos; valores intermediários de fades futuros pertencem ao rendering.
-- **Navegação / cena — DECLARATIVE.** O NavigationController continua fonte da verdade de `currentNode`. A identidade da representação visual será derivada de `currentNode` + SceneRegistry e entregue declarativamente ao rendering. Carregamento, montagem, desmontagem e progresso de transição pertencem ao rendering. O SceneManager não será o NavigationController.
+- **Navegação / cena — DECLARATIVE.** O NavigationController continua fonte da verdade de `currentNode`. A identidade da representação visual é derivada de `currentNode` + SceneRegistry pela aplicação e entregue declarativamente ao rendering como `SceneDefinition | undefined` (§17.4). Carregamento, montagem, desmontagem e progresso de transição pertencem ao rendering. O SceneManager não será o NavigationController.
 - **Seleção — DECLARATIVE.** O SelectionController é a fonte da verdade da seleção semântica. A UI DOM e o rendering poderão reagir declarativamente a `selectedNodeId`; eventos 3D futuros poderão produzir comandos para o SelectionController. Hover não pertence ao Engine.
 - **Câmera — HYBRID.** O CameraController representa a **pose lógica alvo**, não a posição física da câmera em cada frame. O rendering é responsável pela interpolação, pela posição e orientação instantâneas, pelo progresso e pela aplicação na `PerspectiveCamera` do Three. O CameraController não é escrito a cada frame.
 
@@ -1265,7 +1269,7 @@ O progresso de transição pertence ao rendering: fade, progresso de explode, pr
 
 # 18. Scene Manager
 
-O SceneManager será responsável pela cena ativa.
+O SceneManager é responsável pela cena ativa.
 
 ```text
 SceneManager
@@ -1279,6 +1283,14 @@ SceneManager
 Isso não significa quatro Canvas diferentes.
 
 Todos utilizarão o mesmo renderer.
+
+O primeiro SceneManager (`src/rendering/scenes/scene-manager.tsx`) é apenas estrutural e fica dentro do Canvas persistente, ao lado do `RenderingProbe` técnico:
+
+- Recebe `scene: SceneDefinition | undefined` e `layers: LayerControllerState` (§17.4). Não recebe runtime, SceneRegistry, BiologicalGraph, NavigationController nem a composição da aplicação, e não consulta `src/app`.
+- Sem cena, não monta nada; o Canvas continua montado. Não há fallback visual, nem cena anterior mantida, nem estado de carregamento.
+- Com cena, monta um grupo identificado por `scene.nodeId` (a key do elemento raiz faz a subárvore ser remontada quando a cena muda) contendo os `LayerGroups`, que recebem o estado lógico atual das layers.
+- Ainda não interpreta `camera`, `assets` nem `capabilities` da cena e não cria conteúdo visual: a cena técnica de `human` continua sem nenhum objeto visível.
+- Limitação conhecida: o uso direto de `runtime.navigation` pode mudar `currentNode` sem aplicar as layers da nova cena, então a cena e o `LayerControllerState` podem ficar dessincronizados. As mudanças pelo ExperienceController (`enter`, `back`, `returnToBreadcrumb`) mantêm os dois coerentes. O SceneManager é consumidor declarativo e não corrige essa dessincronização.
 
 ---
 
