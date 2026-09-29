@@ -164,7 +164,7 @@ técnica; o rendering recebe apenas o estado de layers. As dependências de rend
 ```text
 src/app/
 ├── experience-config.ts              bootstrap técnico: cena mínima de `human` e createApplicationExperience
-├── experience-runtime-provider.tsx   Client Component: Context com o runtime e useExperienceRuntime
+├── experience-runtime-provider.tsx   Client Component: Context interno com ApplicationExperience (runtime + scenes); useExperienceRuntime e useExperienceScenes
 ├── experience-snapshot-reader.ts     estabiliza a identidade do snapshot para o React, sem React
 ├── use-experience-snapshot.ts        useExperienceSnapshot: leitura reativa via useSyncExternalStore
 ├── experience-rendering-bridge.tsx   Client Component: injeta as layers do snapshot no ExperienceCanvas

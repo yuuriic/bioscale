@@ -47,7 +47,7 @@ const createNeutralRuntime = () => createExperience({ graph, scenes, initialNode
 
 describe("createExperienceSnapshotReader", () => {
   it("keeps the same snapshot until a part changes, and only the changed part is new", () => {
-    const runtime = createApplicationExperience();
+    const { runtime } = createApplicationExperience();
     const reader = createExperienceSnapshotReader(runtime);
 
     const first = reader.getSnapshot();
@@ -68,7 +68,7 @@ describe("createExperienceSnapshotReader", () => {
   });
 
   it("returns a complete ExperienceSnapshot while the pure function stays uncached", () => {
-    const runtime = createApplicationExperience();
+    const { runtime } = createApplicationExperience();
     const reader = createExperienceSnapshotReader(runtime);
 
     expect(Object.keys(reader.getSnapshot()).sort()).toEqual([
@@ -194,7 +194,7 @@ describe("useExperienceSnapshot", () => {
   });
 
   it("uses a stable runtime.subscribe", () => {
-    const runtime = createApplicationExperience();
+    const { runtime } = createApplicationExperience();
     expect(runtime.subscribe).toBe(runtime.subscribe);
   });
 });

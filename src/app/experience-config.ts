@@ -2,7 +2,7 @@ import { createBiologicalGraph } from "@/biology/graph/biological-graph";
 import { mvpBiologicalNodes } from "@/content/nodes/mvp-nodes";
 import { createExperience, type ExperienceRuntime } from "@/experience/engine/create-experience";
 import type { SceneDefinition } from "@/experience/scenes/scene-definition";
-import { createSceneRegistry } from "@/experience/scenes/scene-registry";
+import { createSceneRegistry, type SceneRegistry } from "@/experience/scenes/scene-registry";
 
 /** Nó inicial da experiência atual; ainda não derivado da URL. */
 export const INITIAL_NODE_ID = "human";
@@ -24,12 +24,26 @@ const BOOTSTRAP_SCENES: readonly SceneDefinition[] = [
 ];
 
 /**
- * Cria um novo ExperienceRuntime da aplicação a partir do dataset científico
- * existente. Cada chamada produz uma instância independente: não há runtime
- * no escopo do módulo.
+ * Composição da experiência na aplicação (ARCHITECTURE.md §17.2): o runtime e
+ * o SceneRegistry com que ele foi criado. Apenas referências; não é store e
+ * não contém snapshot.
  */
-export function createApplicationExperience(): ExperienceRuntime {
+export interface ApplicationExperience {
+  readonly runtime: ExperienceRuntime;
+  /** A mesma instância entregue ao Engine; somente leitura. */
+  readonly scenes: SceneRegistry;
+}
+
+/**
+ * Cria uma nova composição da aplicação a partir do dataset científico
+ * existente. O mesmo SceneRegistry é entregue a `createExperience` (e daí ao
+ * ExperienceController) e devolvido na composição, de modo que a aplicação e
+ * o Engine consultam a mesma autoridade de cenas. Cada chamada produz
+ * instâncias independentes: nada fica no escopo do módulo.
+ */
+export function createApplicationExperience(): ApplicationExperience {
   const graph = createBiologicalGraph(mvpBiologicalNodes);
   const scenes = createSceneRegistry(BOOTSTRAP_SCENES, graph);
-  return createExperience({ graph, scenes, initialNodeId: INITIAL_NODE_ID });
+  const runtime = createExperience({ graph, scenes, initialNodeId: INITIAL_NODE_ID });
+  return Object.freeze({ runtime, scenes });
 }

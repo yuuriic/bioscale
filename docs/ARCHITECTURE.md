@@ -1035,7 +1035,7 @@ experience -X→ rendering    proibido (ESLint e testes de fronteira)
 - `ExperienceCanvas` é o único Client Component da camada; o layout e as páginas continuam Server Components. O Canvas é pré-renderizado no servidor sem carregamento dinâmico: o contexto WebGL é criado apenas no navegador.
 - `RenderingProbe` é um objeto técnico temporário (um cubo com iluminação mínima) que comprova o pipeline Next → React → R3F → Three → WebGL. Não é científico e será removido quando existirem cenas reais.
 - A câmera do Canvas é apenas técnica, para tornar o probe visível. Ainda não é controlada pelo CameraController.
-- O rendering não lê o ExperienceSnapshot nem o runtime: recebe da aplicação, por props, apenas o estado que interpreta (§17.4). O único Context existente transporta o runtime (§17.2).
+- O rendering não lê o ExperienceSnapshot nem o runtime: recebe da aplicação, por props, apenas o estado que interpreta (§17.4). O único Context existente transporta a composição da aplicação: runtime e cenas (§17.2).
 
 ## 17.2 Client Experience Composition
 
@@ -1055,9 +1055,9 @@ experience -X→ app, rendering, React
 rendering  -X→ app
 ```
 
-- O Experience Engine continua independente de framework. `createApplicationExperience` (em `src/app/experience-config.ts`) reutiliza o dataset científico e `createExperience`.
-- O runtime não é singleton de módulo. O `ExperienceRuntimeProvider` cria uma instância por montagem, com inicialização preguiçosa de `useState`, e a mantém estável entre renders. Em Strict Mode o inicializador pode rodar mais de uma vez em desenvolvimento; como a criação é síncrona e sem efeitos externos, a instância descartada não deixa rastro. Na renderização no servidor, cada requisição cria e descarta a sua própria instância.
-- O Context é injeção de dependência, não store: transporta apenas a referência ao runtime, nunca um snapshot. `useExperienceRuntime()` apenas acessa o runtime e lança erro fora do Provider.
+- O Experience Engine continua independente de framework. `createApplicationExperience` (em `src/app/experience-config.ts`) reutiliza o dataset científico e `createExperience`, e devolve a composição da aplicação, `ApplicationExperience { runtime, scenes }`: o runtime e o `SceneRegistry` com que ele foi criado. É a mesma instância entregue a `createExperience` e, daí, ao ExperienceController, de modo que a aplicação e o Engine consultam a mesma autoridade de cenas, sem cópia nem outro registry. O `ExperienceRuntime` não mudou.
+- O runtime não é singleton de módulo. O `ExperienceRuntimeProvider` cria uma composição por montagem, com inicialização preguiçosa de `useState`, e a mantém estável entre renders. Em Strict Mode o inicializador pode rodar mais de uma vez em desenvolvimento; como a criação é síncrona e sem efeitos externos, a instância descartada não deixa rastro. Na renderização no servidor, cada requisição cria e descarta a sua própria instância.
+- O Context é injeção de dependência, não store: um único Context interno transporta a composição (referências ao runtime e ao `SceneRegistry`), nunca um snapshot. Os acessores são estreitos: `useExperienceRuntime()` devolve apenas o runtime e `useExperienceScenes()` apenas o `SceneRegistry`, somente leitura; ambos lançam erro fora do Provider. Nenhuma cena ativa é derivada ainda, e o rendering continua sem acesso ao `SceneRegistry`.
 - O `ExperienceCanvas` é descendente do Provider, mas ainda não o consome.
 - A SceneDefinition inicial (`human`) é um bootstrap técnico temporário: sem assets, layers ou capabilities, e não é uma cena científica.
 - A câmera lógica dessa cena e a câmera técnica do Canvas R3F continuam independentes.
@@ -1078,7 +1078,7 @@ reader.getSnapshot ─────────┘   leitura estável
 - `runtime.subscribe` fornece a invalidação. É uma função estável do runtime e não passa pelos métodos observados dos controllers.
 - `getExperienceSnapshot` fornece a leitura e continua criando um agregado novo a cada chamada. O `useSyncExternalStore` exige a mesma referência enquanto nada mudou; por isso o `ExperienceSnapshotReader` guarda o último snapshot e o devolve enquanto as quatro partes (`navigation`, `selection`, `camera`, `layers`) forem as mesmas referências. Não há comparação profunda, contador de versão nem cache global: a comparação por referência basta por causa da identidade semântica dos controllers (§11.6).
 - Cada consumidor cria seu reader uma vez, com `useState` preguiçoso. O runtime vem do Provider e é estável durante a montagem dele; se o Provider remontar, o consumidor também remonta.
-- Não há store duplicada: o estado continua nos controllers, sem `useState` de snapshot, reducer ou efeito de sincronização. O Context continua transportando apenas o runtime, nunca o snapshot.
+- Não há store duplicada: o estado continua nos controllers, sem `useState` de snapshot, reducer ou efeito de sincronização. O Context continua transportando apenas a composição (runtime e cenas), nunca o snapshot.
 - SSR e hidratação usam `getServerSnapshot`, que é o mesmo reader. O runtime do servidor e o do cliente são instâncias diferentes, cada uma criada pelo Provider na sua renderização. A coerência entre o markup do servidor e a primeira leitura do cliente vem da inicialização determinística do runtime, não da identidade entre objetos.
 - Não há selectors nesta etapa: o hook devolve o snapshot completo.
 - O Canvas não consome o hook: recebe da ponte da aplicação somente o que interpreta (§17.4).
@@ -1228,7 +1228,7 @@ O progresso de transição pertence ao rendering: fade, progresso de explode, pr
 
 ### Lacunas registradas
 
-- **SceneRegistry.** `createApplicationExperience` cria o SceneRegistry, mas ele não fica disponível para a aplicação depois da composição, o que bloqueia resolver `currentNode → SceneDefinition` fora da criação inicial. O próximo milestone deverá definir uma API somente leitura para a aplicação consultar as cenas, sem tornar o registry global, sem duplicá-lo, sem expor mutação, sem colocar conhecimento de cenas no rendering e sem que o SceneManager consulte o BiologicalGraph diretamente.
+- **SceneRegistry (resolvida).** `createApplicationExperience` devolve a composição `{ runtime, scenes }`, e a aplicação lê as cenas com `useExperienceScenes()` (§17.2). É a mesma instância usada pelo Engine, já somente leitura (congelada, sem métodos de mutação), sem registry global, sem cópia e sem nova interface. O rendering continua sem acesso a ela, e o SceneManager não consulta o BiologicalGraph. A derivação da cena ativa ainda não foi feita.
 - **Gap A — Asset Registry.** Ainda não existe a resolução `assetId → recurso visual carregável`.
 - **Gap B — layer → conteúdo visual.** `VisualLayer` não descreve qual asset ou parte visual pertence à layer.
 - **Gap C — autoridade duplicada.** `BiologicalNode.model` e `SceneDefinition.assets` podem representar referências visuais concorrentes. Precisa ser resolvido antes do primeiro loader científico real.
@@ -1248,6 +1248,7 @@ O progresso de transição pertence ao rendering: fade, progresso de explode, pr
 - O Canvas continua persistente.
 - O rendering nunca depende de `src/app`.
 - O SceneManager não será dono da navegação nem do grafo científico.
+- A aplicação lê o SceneRegistry pela composição da aplicação (`useExperienceScenes`), na mesma instância usada pelo Engine; o `ExperienceRuntime` não expõe cenas.
 
 **Em aberto**
 
@@ -1255,7 +1256,6 @@ O progresso de transição pertence ao rendering: fade, progresso de explode, pr
 - semântica de consolidação da órbita manual;
 - autoridade sobre a câmera no Guided × Explore;
 - semântica do scroll;
-- exposição somente leitura do SceneRegistry;
 - contrato do Asset Registry;
 - mapeamento layer → asset;
 - autoridade entre `BiologicalNode.model` e `SceneDefinition.assets`;

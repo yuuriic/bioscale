@@ -3,10 +3,17 @@ import { fileURLToPath } from "node:url";
 import { createElement, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { mvpBiologicalNodes } from "@/content/nodes/mvp-nodes";
 import { DEFAULT_FIELD_OF_VIEW } from "@/experience/camera/camera-controller";
 import type { ExperienceRuntime } from "@/experience/engine/create-experience";
+import { SceneNotAvailableError } from "@/experience/engine/experience-controller";
+import type { SceneRegistry } from "@/experience/scenes/scene-registry";
 import { createApplicationExperience, INITIAL_NODE_ID } from "./experience-config";
-import { ExperienceRuntimeProvider, useExperienceRuntime } from "./experience-runtime-provider";
+import {
+  ExperienceRuntimeProvider,
+  useExperienceRuntime,
+  useExperienceScenes,
+} from "./experience-runtime-provider";
 
 // Composição React ↔ Experience Engine (ARCHITECTURE.md §17.2). Sem DOM nem
 // WebGL: o Provider e o hook são exercitados por renderização no servidor.
@@ -39,8 +46,14 @@ const withProvider = (children: ReactNode) =>
   createElement(ExperienceRuntimeProvider, null, children);
 
 describe("createApplicationExperience", () => {
+  it("returns a frozen composition with only the runtime and the scenes", () => {
+    const composition = createApplicationExperience();
+    expect(Object.keys(composition).sort()).toEqual(["runtime", "scenes"]);
+    expect(Object.isFrozen(composition)).toBe(true);
+  });
+
   it("starts at the initial node with empty history, selection and layers", () => {
-    const runtime = createApplicationExperience();
+    const { runtime } = createApplicationExperience();
 
     expect(INITIAL_NODE_ID).toBe("human");
     expect(runtime.navigation.getState()).toEqual({
@@ -62,8 +75,54 @@ describe("createApplicationExperience", () => {
     const second = createApplicationExperience();
 
     expect(second).not.toBe(first);
-    first.selection.select("brain");
-    expect(second.selection.getState()).toEqual({});
+    expect(second.runtime).not.toBe(first.runtime);
+    expect(second.scenes).not.toBe(first.scenes);
+    first.runtime.selection.select("brain");
+    expect(second.runtime.selection.getState()).toEqual({});
+  });
+
+  it("exposes the scene of the initial node, always as the same frozen reference", () => {
+    const { scenes } = createApplicationExperience();
+    const scene = scenes.getScene(INITIAL_NODE_ID);
+
+    expect(scene?.nodeId).toBe("human");
+    expect(scenes.getScene(INITIAL_NODE_ID)).toBe(scene);
+    expect(Object.isFrozen(scene)).toBe(true);
+    expect(scenes.scenes.filter((candidate) => candidate.nodeId === "human")).toEqual([scene]);
+  });
+
+  it("keeps the runtime camera and layers coherent with the exposed initial scene", () => {
+    const { runtime, scenes } = createApplicationExperience();
+    const scene = scenes.getScene(INITIAL_NODE_ID);
+
+    expect(runtime.camera.getState()).toEqual({
+      ...scene?.camera,
+      fieldOfView: scene?.camera.fieldOfView ?? DEFAULT_FIELD_OF_VIEW,
+    });
+    expect(runtime.layers.getState().layers.map((layer) => layer.layerId)).toEqual(
+      scene?.layers.map((layer) => layer.id),
+    );
+  });
+});
+
+describe("createApplicationExperience scene authority", () => {
+  it("lets the ExperienceController enter exactly the nodes the exposed scenes resolve", () => {
+    for (const { id } of mvpBiologicalNodes) {
+      const { runtime, scenes } = createApplicationExperience();
+      if (scenes.getScene(id) === undefined) {
+        expect(() => runtime.experience.enter(id), id).toThrow(SceneNotAvailableError);
+      } else {
+        expect(() => runtime.experience.enter(id), id).not.toThrow();
+      }
+    }
+  });
+
+  it("passes the same registry variable to the Engine and to the composition", () => {
+    const body = read("app/experience-config.ts").split("export function createApplicationExperience")[1];
+    expect(body?.match(/createSceneRegistry\(/g)).toHaveLength(1);
+    expect(body).toMatch(/const scenes = createSceneRegistry\(/);
+    expect(body).toMatch(/createExperience\(\{ graph, scenes, initialNodeId: INITIAL_NODE_ID \}\)/);
+    expect(body).toMatch(/return Object\.freeze\(\{ runtime, scenes \}\);/);
   });
 });
 
@@ -88,12 +147,57 @@ describe("ExperienceRuntimeProvider and useExperienceRuntime", () => {
     );
   });
 
-  it("keeps the runtime in lazy useState, which preserves identity across renders", () => {
+  it("keeps the composition in lazy useState, which preserves identity across renders", () => {
     // Re-render real exige DOM, indisponível no Vitest atual: a garantia é a
     // semântica de estado do React, verificada estruturalmente.
     const source = read("app/experience-runtime-provider.tsx");
-    expect(source).toMatch(/const \[runtime\] = useState\(createApplicationExperience\);/);
-    expect(source).not.toMatch(/\buseMemo\b|\buseRef\b/);
+    expect(source).toMatch(/const \[experience\] = useState\(createApplicationExperience\);/);
+    expect(source).not.toMatch(/\buseMemo\b|\buseRef\b|\buseEffect\b/);
+  });
+});
+
+describe("useExperienceScenes", () => {
+  /** Renderiza consumidores que leem runtime e cenas do mesmo Provider. */
+  function renderBoth(count: number) {
+    const received: { runtime: ExperienceRuntime; scenes: SceneRegistry }[] = [];
+    function Consumer() {
+      received.push({ runtime: useExperienceRuntime(), scenes: useExperienceScenes() });
+      return null;
+    }
+    renderToString(
+      withProvider(Array.from({ length: count }, (_, key) => createElement(Consumer, { key }))),
+    );
+    return received;
+  }
+
+  it("provides the scenes of the same composition as the runtime", () => {
+    const received = renderBoth(2);
+    const [first, second] = received;
+
+    expect(second?.runtime).toBe(first?.runtime);
+    expect(second?.scenes).toBe(first?.scenes);
+    expect(first?.scenes.getScene("human")).toBe(second?.scenes.getScene("human"));
+    expect(first?.runtime.navigation.getState().currentNode).toBe("human");
+    // Autoridade única: o Engine recusa exatamente os nós sem cena nesse registry.
+    expect(first?.scenes.getScene("brain")).toBeUndefined();
+    expect(() => first?.runtime.experience.enter("brain")).toThrow(SceneNotAvailableError);
+  });
+
+  it("gives each Provider mount its own scenes and runtime", () => {
+    const [first] = renderBoth(1);
+    const [second] = renderBoth(1);
+    expect(second?.scenes).not.toBe(first?.scenes);
+    expect(second?.runtime).not.toBe(first?.runtime);
+  });
+
+  it("throws a clear error outside the Provider", () => {
+    function Orphan() {
+      useExperienceScenes();
+      return null;
+    }
+    expect(() => renderToString(createElement(Orphan))).toThrow(
+      "useExperienceScenes must be used within an ExperienceRuntimeProvider.",
+    );
   });
 });
 
@@ -127,15 +231,42 @@ describe("client composition boundaries", () => {
     }
   });
 
-  it("transports the runtime in Context, never a snapshot, store or subscription", () => {
+  it("transports the composition in a single Context, never a snapshot, store or subscription", () => {
     const file = "app/experience-runtime-provider.tsx";
     expect(importsOf(file).sort()).toEqual([
       "./experience-config",
       "@/experience/engine/create-experience",
+      "@/experience/scenes/scene-registry",
       "react",
     ]);
-    expect(read(file)).toMatch(/createContext<ExperienceRuntime \| null>/);
+    expect(read(file)).toMatch(/createContext<ApplicationExperience \| null>/);
     expect(read(file)).not.toMatch(/useSyncExternalStore|useReducer|getExperienceSnapshot/);
+  });
+
+  it("has a single Context and a single Provider in the application layer", () => {
+    const appSources = sourceFiles("app").filter((file) => !file.endsWith(".test.ts"));
+    const contexts = appSources.flatMap((file) => [...read(file).matchAll(/\bcreateContext\b\s*[<(]/g)]);
+    const providers = appSources.flatMap((file) =>
+      [...read(file).matchAll(/export function (\w*Provider)\b/g)].map((match) => match[1]),
+    );
+    expect(contexts).toHaveLength(1);
+    expect(providers).toEqual(["ExperienceRuntimeProvider"]);
+  });
+
+  it("keeps scenes out of the rendering layer and the runtime", () => {
+    for (const file of sourceFiles("rendering").filter((f) => !f.endsWith(".test.ts"))) {
+      expect(importsOf(file).filter((s) => s.includes("scene-registry")), file).toEqual([]);
+      expect(read(file), file).not.toMatch(/\buseExperienceScenes\b|\bSceneRegistry\b/);
+    }
+    const { runtime } = createApplicationExperience();
+    expect(Object.keys(runtime).sort()).toEqual([
+      "camera",
+      "experience",
+      "layers",
+      "navigation",
+      "selection",
+      "subscribe",
+    ]);
   });
 
   it("mounts the rendering bridge and the DOM content inside the Provider in the root layout", () => {
