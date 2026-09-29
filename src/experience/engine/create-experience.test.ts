@@ -102,7 +102,7 @@ describe("createExperience initial state", () => {
     expect(runtime.layers.getState()).toEqual({ layers: [] });
   });
 
-  it("returns only controller references, frozen", () => {
+  it("returns only controller references and subscribe, frozen", () => {
     const runtime = createAtA();
     expect(Object.keys(runtime).sort()).toEqual([
       "camera",
@@ -110,6 +110,7 @@ describe("createExperience initial state", () => {
       "layers",
       "navigation",
       "selection",
+      "subscribe",
     ]);
     expect(Object.isFrozen(runtime)).toBe(true);
   });
@@ -204,6 +205,7 @@ describe("createExperience module boundaries", () => {
       "@/experience/navigation/navigation-controller",
       "@/experience/scenes/scene-registry",
       "@/experience/selection/selection-controller",
+      "./experience-change-notifier",
       "./experience-controller",
     ]);
     expect(specifiers.filter((s) => !allowed.has(s))).toEqual([]);
@@ -215,8 +217,9 @@ describe("createExperience module boundaries", () => {
   });
 
   it("has no aggregated state, store, singleton, events, I/O or platform access", () => {
+    // `subscribe` é o contrato de notificação do runtime (§11.6), não um event bus.
     const forbidden =
-      /\b(ExperienceState|getState|store|Store|zustand|singleton|instance|subscribe|emit|listener\w*|fetch|window|document|WebGL\w*|HTMLCanvasElement|THREE|React|mvpBiologicalNodes)\b/;
+      /\b(ExperienceState|getState|store|Store|zustand|singleton|instance|emit|fetch|window|document|WebGL\w*|HTMLCanvasElement|THREE|React|mvpBiologicalNodes)\b/;
     expect(code).not.toMatch(forbidden);
     expect(code).not.toMatch(/^let\s|^\s*static\s/m);
   });

@@ -128,6 +128,11 @@ estados de navegação, seleção, câmera e layers, para consumidores futuros.
 Depende apenas dos tipos de estado dos controllers; ainda não há consumidor de
 rendering.
 
+`experience-change-notifier.ts` implementa `subscribe` do runtime
+(ARCHITECTURE.md §11.6): observa as operações feitas pelas referências do
+runtime e notifica, sem payload, quando o estado dos controllers muda. É
+TypeScript puro, sem imports; React ainda não o consome.
+
 ## LayerController
 
 `src/experience/layers` contém o `LayerControllerState` e o `LayerController`

@@ -627,6 +627,7 @@ describe("engine module boundaries", () => {
     expect(sources.map(({ file }) => file)).toEqual(["experience-controller.ts"]);
     expect(readdirSync(directory).filter((file) => !file.endsWith(".test.ts")).sort()).toEqual([
       "create-experience.ts",
+      "experience-change-notifier.ts",
       "experience-controller.ts",
       "experience-snapshot.ts",
     ]);

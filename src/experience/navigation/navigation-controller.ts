@@ -63,7 +63,8 @@ export interface CurrentNodeRelations {
  * - navegar para o nó atual, ou retornar à posição atual, não altera o
  *   estado;
  * - `back` sem histórico não altera o estado;
- * - `mode` é apenas estado nesta etapa.
+ * - `mode` é apenas estado nesta etapa; trocar para o modo atual não altera
+ *   o estado.
  *
  * Seleção não pertence à navegação (SelectionController). Limpar a seleção
  * ao trocar de estrutura cabe ao ExperienceController.
@@ -120,7 +121,11 @@ export class NavigationController {
     return this.#state.history.length > 0;
   }
 
+  /** Trocar para o modo atual não altera o estado (mesma referência). */
   setMode(mode: NavigationMode): void {
+    if (this.#state.mode === mode) {
+      return;
+    }
     this.#state = freezeState({ ...this.#state, mode });
   }
 

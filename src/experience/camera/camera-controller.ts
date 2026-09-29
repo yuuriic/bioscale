@@ -34,7 +34,11 @@ export class InvalidCameraStateError extends Error {
  * - `reset` volta ao preset aplicado mais recentemente (o da construção,
  *   se nenhum outro foi aplicado): o enquadramento base da cena atual;
  * - foco em objetos e zoom semântico ainda não existem: `target` é o foco
- *   espacial abstrato atual.
+ *   espacial abstrato atual;
+ * - a identidade do estado é semântica: uma operação que resulta nos mesmos
+ *   valores (componentes de `position` e `target`, e `fieldOfView`) preserva
+ *   a referência; qualquer mudança observável produz um novo estado. A
+ *   entrada é sempre validada antes da comparação.
  */
 export class CameraController {
   #base: CameraState;
@@ -50,27 +54,56 @@ export class CameraController {
     return this.#state;
   }
 
-  /** Aplica o enquadramento de um preset e o torna a base de `reset`. */
+  /**
+   * Aplica o enquadramento de um preset e o torna a base de `reset`.
+   *
+   * A base e o estado atual são decididos separadamente: a base passa a ser o
+   * preset sempre que difere dela, mesmo que a câmera atual já tenha esses
+   * valores (o `reset` futuro muda); o estado só ganha nova referência se
+   * seus valores mudarem. A base não faz parte do estado observável.
+   */
   applyPreset(preset: CameraPreset): void {
-    this.#base = resolvePreset(preset);
-    this.#state = this.#base;
+    const next = resolvePreset(preset);
+    if (!isSameCamera(next, this.#base)) {
+      this.#base = next;
+    }
+    this.#commit(this.#base);
   }
 
   setPosition(position: Vec3): void {
-    this.#state = resolveState({ ...this.#state, position });
+    this.#commit(resolveState({ ...this.#state, position }));
   }
 
   setTarget(target: Vec3): void {
-    this.#state = resolveState({ ...this.#state, target });
+    this.#commit(resolveState({ ...this.#state, target }));
   }
 
   setFieldOfView(fieldOfView: number): void {
-    this.#state = resolveState({ ...this.#state, fieldOfView });
+    this.#commit(resolveState({ ...this.#state, fieldOfView }));
   }
 
   reset(): void {
-    this.#state = this.#base;
+    this.#commit(this.#base);
   }
+
+  /** Adota `next` somente se ele difere do estado atual em algum valor. */
+  #commit(next: CameraState): void {
+    if (!isSameCamera(next, this.#state)) {
+      this.#state = next;
+    }
+  }
+}
+
+function isSameCamera(a: CameraState, b: CameraState): boolean {
+  return (
+    isSameVec3(a.position, b.position) &&
+    isSameVec3(a.target, b.target) &&
+    a.fieldOfView === b.fieldOfView
+  );
+}
+
+function isSameVec3(a: Vec3, b: Vec3): boolean {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
 }
 
 function resolvePreset(preset: CameraPreset): CameraState {

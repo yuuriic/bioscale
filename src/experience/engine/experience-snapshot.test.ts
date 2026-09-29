@@ -183,6 +183,7 @@ describe("getExperienceSnapshot as a photograph", () => {
       "layers",
       "navigation",
       "selection",
+      "subscribe",
     ]);
   });
 });

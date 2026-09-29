@@ -279,6 +279,13 @@ describe("NavigationController responsibility", () => {
 });
 
 describe("NavigationController mode", () => {
+  it("keeps the same state when setting the current mode", () => {
+    const nav = controller();
+    const before = nav.getState();
+    nav.setMode("guided");
+    expect(nav.getState()).toBe(before);
+  });
+
   it("switches from guided to explore", () => {
     const nav = walk(controller(), "b");
     nav.setMode("explore");

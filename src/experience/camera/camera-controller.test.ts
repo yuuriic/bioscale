@@ -246,6 +246,126 @@ describe("CameraController immutability", () => {
   });
 });
 
+describe("CameraController semantic state identity", () => {
+  it("keeps the same state when setters receive the current values in new arrays", () => {
+    const camera = new CameraController(FULL);
+    const before = camera.getState();
+
+    camera.setPosition([0, 0, 10]);
+    camera.setTarget([0, 0, 0]);
+    camera.setFieldOfView(40);
+
+    expect(camera.getState()).toBe(before);
+  });
+
+  it("creates a new state when a setter changes a value", () => {
+    const camera = new CameraController(FULL);
+
+    const initial = camera.getState();
+    camera.setPosition([0, 0, 11]);
+    const afterPosition = camera.getState();
+    camera.setTarget([0, 0, 1]);
+    const afterTarget = camera.getState();
+    camera.setFieldOfView(41);
+
+    expect(afterPosition).not.toBe(initial);
+    expect(afterTarget).not.toBe(afterPosition);
+    expect(camera.getState()).not.toBe(afterTarget);
+  });
+
+  it("compares vectors component by component", () => {
+    const camera = new CameraController(FULL);
+    const before = camera.getState();
+
+    camera.setPosition([0, 0.5, 10]);
+    expect(camera.getState()).not.toBe(before);
+    expect(camera.getState().position).toEqual([0, 0.5, 10]);
+  });
+
+  it("keeps the same state on reset when already at the reset base", () => {
+    const camera = new CameraController(FULL);
+    const initial = camera.getState();
+    camera.reset();
+    expect(camera.getState()).toBe(initial);
+
+    // Voltar manualmente aos valores da base também não é mudança para reset.
+    camera.setPosition([1, 1, 1]);
+    camera.setPosition([0, 0, 10]);
+    const returned = camera.getState();
+    camera.reset();
+    expect(camera.getState()).toBe(returned);
+  });
+
+  it("creates a new state on reset after a change", () => {
+    const camera = new CameraController(FULL);
+    camera.setFieldOfView(70);
+    const changed = camera.getState();
+
+    camera.reset();
+
+    expect(camera.getState()).not.toBe(changed);
+    expect(camera.getState()).toEqual(FULL);
+  });
+
+  it("treats applyPreset as a no-op when the current state and the reset base already match it", () => {
+    const camera = new CameraController(FULL);
+    const before = camera.getState();
+
+    camera.applyPreset({ position: [0, 0, 10], target: [0, 0, 0], fieldOfView: 40 });
+    expect(camera.getState()).toBe(before);
+
+    camera.setPosition([2, 2, 2]);
+    camera.reset();
+    expect(camera.getState()).toBe(before);
+  });
+
+  it("updates the reset base even when the current camera already shows the new preset", () => {
+    const camera = new CameraController(FULL);
+    camera.setPosition([0, 3, 6]);
+    camera.setTarget([0, 1, 0]);
+    camera.setFieldOfView(30);
+    const showingOther = camera.getState();
+
+    camera.applyPreset(OTHER);
+
+    // O estado observável não mudou: mesma referência.
+    expect(camera.getState()).toBe(showingOther);
+    // Mas o reset agora volta a OTHER, não a FULL.
+    camera.setPosition([9, 9, 9]);
+    camera.reset();
+    expect(camera.getState()).toEqual(OTHER);
+  });
+
+  it("applies the preset when only the current state differs from it", () => {
+    const camera = new CameraController(FULL);
+    camera.setPosition([4, 4, 4]);
+    const moved = camera.getState();
+
+    camera.applyPreset(FULL);
+
+    expect(camera.getState()).not.toBe(moved);
+    expect(camera.getState()).toEqual(FULL);
+  });
+
+  it("still validates inputs that look like the current values", () => {
+    const camera = new CameraController(FULL);
+    expectRejectedWithoutChange(camera, () => camera.setTarget([0, 0, 10]), [
+      "position_equals_target",
+    ]);
+    expectRejectedWithoutChange(camera, () => camera.setFieldOfView(Number.NaN), [
+      "invalid_field_of_view",
+    ]);
+    expectRejectedWithoutChange(
+      camera,
+      () => camera.applyPreset({ position: [0, 0, 10], target: [0, 0, 10], fieldOfView: 40 }),
+      ["position_equals_target"],
+    );
+    camera.setPosition([1, 1, 1]);
+    camera.reset();
+    expect(camera.getState()).toEqual(FULL);
+  });
+});
+
 describe("camera module boundaries", () => {
   const directory = fileURLToPath(new URL(".", import.meta.url));
   const sources = readdirSync(directory)

@@ -728,12 +728,40 @@ interface ExperienceSnapshot {
 
 - É uma fotografia read-only do estado lógico em um instante. Não contém cenas, grafo, assets nem conceitos de rendering, e não conhece renderer ou Three.js.
 - É calculada sob demanda e nunca armazenada: não há `runtime.snapshot` nem `getState` no ExperienceController.
-- Não é reativa: não há subscription, eventos nem store. A ponte reativa com a interface será definida depois.
+- Não é reativa: o snapshot não se atualiza nem avisa mudanças. O aviso de mudança é a subscription do runtime (§11.6); a ponte reativa com a interface será definida depois.
 - Cada chamada cria um novo objeto agregado, congelado, mesmo sem mudanças. Os estados especializados são compartilhados por referência, porque os controllers já os expõem como snapshots imutáveis.
 - Por isso, fotografias antigas continuam válidas depois de qualquer mudança posterior.
 - A função recebe apenas os quatro controllers de estado do runtime, não o ExperienceController.
 
 Nenhum consumidor existe ainda: a integração com rendering não foi implementada.
+
+---
+
+## 11.6 Experience Change Notification
+
+O `ExperienceRuntime` possui uma fronteira mínima de notificação:
+
+```ts
+type ExperienceChangeListener = () => void
+
+interface ExperienceRuntime {
+  // experience, navigation, selection, camera, layers
+  subscribe(listener: ExperienceChangeListener): () => void // devolve unsubscribe
+}
+```
+
+A combinação futura com a interface será `subscribe` + `getExperienceSnapshot` (§11.5). React ainda não está conectado.
+
+- A notificação significa apenas "o estado observável pode ter mudado". Não há payload: nem tipo de evento, nem estado, nem snapshot. Não é um event bus.
+- É síncrona: ocorre ao fim da operação, antes de ela retornar, sem timers, microtasks ou debounce.
+- A fronteira vive no runtime, não nos controllers. Os objetos expostos pelo runtime são versões observadas das mesmas instâncias (Proxy nativo, com tipos, métodos e `instanceof` preservados), então mutações diretas nos controllers também notificam. O ExperienceController trabalha com as instâncias originais.
+- Mudança é detectada pela identidade dos estados dos quatro controllers antes e depois da operação. Isso depende de um contrato dos controllers: a identidade do estado é semântica. Operação sem efeito mantém a mesma referência de estado; mudança observável produz uma nova referência. O notifier não compara valores. Operações que falham antes de mudar estado não notificam, e seu erro é propagado sem alteração.
+- Exceção deliberada: `LayerController.applyLayers()` sempre cria um novo estado, mesmo equivalente, porque representa uma nova configuração (§13); por isso notifica.
+- No CameraController, a equivalência compara os valores (componentes de `position` e `target`, e `fieldOfView`), sem tolerância numérica, depois da validação. `applyPreset` decide separadamente a base de `reset` e o estado atual: a base passa a ser o preset sempre que difere dela, mesmo que a câmera já mostre esses valores, e o estado só muda de referência se seus valores mudarem. A base não é estado observável, então trocá-la sozinha não notifica, mas altera o `reset` futuro.
+- Cada operação pública gera no máximo uma notificação. `enter`, `back` e `returnToBreadcrumb` alteram vários controllers e notificam uma única vez.
+- `unsubscribe` é idempotente. Cada `subscribe` é uma inscrição independente, inclusive do mesmo listener. A emissão percorre as inscrições existentes no seu início; uma inscrição removida durante a emissão não é mais chamada.
+- Se um listener lançar, os demais ainda são chamados e o erro é relançado depois (vários: `AggregateError`). O estado já está consolidado e as próximas notificações não são afetadas.
+- Uma mutação feita dentro de um listener é uma nova operação, notificada de forma síncrona e aninhada antes de a emissão atual continuar. Listeners que sempre mutam o estado ao serem notificados podem entrar em ciclo; isso é responsabilidade de quem os escreve.
 
 ---
 
