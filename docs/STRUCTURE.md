@@ -162,12 +162,16 @@ src/rendering/
 src/app/
 ├── experience-config.ts              bootstrap técnico: cena mínima de `human` e createApplicationExperience
 ├── experience-runtime-provider.tsx   Client Component: Context com o runtime e useExperienceRuntime
-└── experience-composition.test.ts    Provider, hook e fronteiras da composição
+├── experience-snapshot-reader.ts     estabiliza a identidade do snapshot para o React, sem React
+├── use-experience-snapshot.ts        useExperienceSnapshot: leitura reativa via useSyncExternalStore
+├── experience-composition.test.ts    Provider, hook e fronteiras da composição
+└── experience-snapshot-bridge.test.ts reader, hook, SSR e estrutura da ponte
 ```
 
 `layout.tsx` continua Server Component e monta o `ExperienceRuntimeProvider`
-envolvendo o `ExperienceCanvas` e a interface (ARCHITECTURE.md §17.2). O Canvas
-ainda não consome o runtime, e nenhum snapshot é sincronizado com React.
+envolvendo o `ExperienceCanvas` e a interface (ARCHITECTURE.md §17.2). Componentes
+descendentes leem o snapshot com `useExperienceSnapshot` (§17.3); o Canvas ainda
+não consome o runtime nem o snapshot.
 
 ## Dependências e verificação
 

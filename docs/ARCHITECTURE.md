@@ -728,7 +728,7 @@ interface ExperienceSnapshot {
 
 - É uma fotografia read-only do estado lógico em um instante. Não contém cenas, grafo, assets nem conceitos de rendering, e não conhece renderer ou Three.js.
 - É calculada sob demanda e nunca armazenada: não há `runtime.snapshot` nem `getState` no ExperienceController.
-- Não é reativa: o snapshot não se atualiza nem avisa mudanças. O aviso de mudança é a subscription do runtime (§11.6); a ponte reativa com a interface será definida depois.
+- Não é reativa: o snapshot não se atualiza nem avisa mudanças. O aviso de mudança é a subscription do runtime (§11.6); a ponte reativa com React é descrita em §17.3.
 - Cada chamada cria um novo objeto agregado, congelado, mesmo sem mudanças. Os estados especializados são compartilhados por referência, porque os controllers já os expõem como snapshots imutáveis.
 - Por isso, fotografias antigas continuam válidas depois de qualquer mudança posterior.
 - A função recebe apenas os quatro controllers de estado do runtime, não o ExperienceController.
@@ -750,7 +750,7 @@ interface ExperienceRuntime {
 }
 ```
 
-A combinação futura com a interface será `subscribe` + `getExperienceSnapshot` (§11.5). React ainda não está conectado.
+A combinação com a interface é `subscribe` + `getExperienceSnapshot` (§11.5), feita pelo adapter React em `src/app` (§17.3); o Engine não conhece React.
 
 - A notificação significa apenas "o estado observável pode ter mudado". Não há payload: nem tipo de evento, nem estado, nem snapshot. Não é um event bus.
 - É síncrona: ocorre ao fim da operação, antes de ela retornar, sem timers, microtasks ou debounce.
@@ -1061,7 +1061,27 @@ rendering  -X→ app
 - O `ExperienceCanvas` é descendente do Provider, mas ainda não o consome.
 - A SceneDefinition inicial (`human`) é um bootstrap técnico temporário: sem assets, layers ou capabilities, e não é uma cena científica.
 - A câmera lógica dessa cena e a câmera técnica do Canvas R3F continuam independentes.
-- Não existe snapshot reativo: nada sincroniza o Engine com React ou com o rendering.
+- A leitura reativa do snapshot é feita por `useExperienceSnapshot` (§17.3). Nada sincroniza o Engine com o rendering.
+
+## 17.3 React Experience Snapshot Bridge
+
+`useExperienceSnapshot()` é o adapter React do Experience Engine, em `src/app`. Devolve o `ExperienceSnapshot` completo e faz o componente renderizar de novo quando o runtime muda:
+
+```text
+runtime.subscribe ──────────┐   invalidação
+                            ├──► useSyncExternalStore ──► componente
+reader.getSnapshot ─────────┘   leitura estável
+  └── getExperienceSnapshot(runtime)
+```
+
+- O Experience Engine continua sem React; a estabilização exigida pelo React pertence ao adapter.
+- `runtime.subscribe` fornece a invalidação. É uma função estável do runtime e não passa pelos métodos observados dos controllers.
+- `getExperienceSnapshot` fornece a leitura e continua criando um agregado novo a cada chamada. O `useSyncExternalStore` exige a mesma referência enquanto nada mudou; por isso o `ExperienceSnapshotReader` guarda o último snapshot e o devolve enquanto as quatro partes (`navigation`, `selection`, `camera`, `layers`) forem as mesmas referências. Não há comparação profunda, contador de versão nem cache global: a comparação por referência basta por causa da identidade semântica dos controllers (§11.6).
+- Cada consumidor cria seu reader uma vez, com `useState` preguiçoso. O runtime vem do Provider e é estável durante a montagem dele; se o Provider remontar, o consumidor também remonta.
+- Não há store duplicada: o estado continua nos controllers, sem `useState` de snapshot, reducer ou efeito de sincronização. O Context continua transportando apenas o runtime, nunca o snapshot.
+- SSR e hidratação usam `getServerSnapshot`, que é o mesmo reader. O runtime do servidor e o do cliente são instâncias diferentes, cada uma criada pelo Provider na sua renderização. A coerência entre o markup do servidor e a primeira leitura do cliente vem da inicialização determinística do runtime, não da identidade entre objetos.
+- Não há selectors nesta etapa: o hook devolve o snapshot completo.
+- O Canvas ainda não consome o snapshot.
 
 ---
 
