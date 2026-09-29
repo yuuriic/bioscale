@@ -50,9 +50,13 @@ const UPPER_LAYERS = ["app", "components", "experience", "store", "hooks"];
 
 // Camadas independentes de plataforma: além de imports, não podem tocar
 // DOM/WebGL através de globais nem de tipos da lib "dom".
-const PLATFORM_FREE = ["types", "utils", "content", "biology"].map(
-  (name) => `src/${name}/**/*.{ts,tsx}`,
-);
+const PLATFORM_FREE = [
+  "types",
+  "utils",
+  "content",
+  "biology",
+  "experience/navigation",
+].map((name) => `src/${name}/**/*.{ts,tsx}`);
 
 const PLATFORM_GLOBALS = [
   "window",
@@ -154,6 +158,27 @@ export default defineConfig([
     files: ["src/experience/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": restrict(layersGroup("app", "components")),
+    },
+  },
+  // NavigationController é TypeScript puro: depende do grafo por injeção,
+  // nunca do dataset concreto. Testes de integração podem importar content.
+  {
+    files: ["src/experience/navigation/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": restrict(
+        frameworkGroup,
+        layersGroup("app", "components", "store", "hooks", "assets"),
+      ),
+    },
+  },
+  {
+    files: ["src/experience/navigation/**/*.{ts,tsx}"],
+    ignores: ["**/*.test.ts"],
+    rules: {
+      "no-restricted-imports": restrict(
+        frameworkGroup,
+        layersGroup("app", "components", "store", "hooks", "assets", "content"),
+      ),
     },
   },
 ]);

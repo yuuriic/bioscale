@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [],
+    "plugins": [],
+    "incremental": false
+  },
+  "include": [
+    "src/biology/**/*.ts",
+    "src/content/**/*.ts",
+    "src/types/**/*.ts",
+    "src/utils/**/*.ts",
+    "src/experience/navigation/**/*.ts"
+  ],
+  "exclude": ["node_modules", "src/**/*.test.ts"]
+}

@@ -28,7 +28,7 @@ Corpo Humano
      ↓
 Sistema Nervoso
      ↓
-Cérebro
+Encéfalo
      ↓
 Tecido Nervoso
      ↓
@@ -336,8 +336,6 @@ interface BiologicalNode {
     | "protein"
     | "molecule"
 
-  description: string
-
   scale?: Scale
 
   model?: AssetReference
@@ -347,6 +345,14 @@ interface BiologicalNode {
   relations: BiologicalRelation[]
 }
 ```
+
+O nó representa identidade, classificação e relações.
+
+Não possui texto científico próprio: todo texto científico pertence a `EducationalContent` (§22), que exige referências. Assim existe uma única fonte de verdade rastreável.
+
+`id` é a identidade científica estável da estrutura, em slug inglês (`nervous-system`, `brain`), usada em URLs, no grafo e em futuras referências de cena e assets.
+
+`name` e o conteúdo textual representam atualmente um único idioma (português). Internacionalização deverá ser tratada antes de oferecer múltiplos idiomas.
 
 ---
 
@@ -386,6 +392,12 @@ Uma relação declarada é a fonte de verdade.
 O sistema não deverá assumir que toda célula possui núcleo ou que todas as estruturas seguem o mesmo caminho.
 
 As relações deverão representar a realidade biológica.
+
+O grafo não é exaustivo.
+
+A ausência de uma relação no dataset não significa a ausência dessa relação na biologia. Consumidores não deverão interpretar a quantidade de relações de um nó como representação completa da estrutura biológica.
+
+Relações não possuem cardinalidade (ex.: quantidade de cromossomos em um núcleo). Cardinalidade é uma evolução futura, a ser introduzida somente quando uma experiência realmente necessitar dessa informação.
 
 ---
 
@@ -532,6 +544,22 @@ interface NavigationState {
     | "explore"
 }
 ```
+
+O histórico e os breadcrumbs representam o percurso efetivamente seguido pelo usuário na sessão, não um caminho derivado do Biological Graph. Como o grafo não é uma árvore, o mesmo nó alcançado por caminhos diferentes produz breadcrumbs diferentes.
+
+Navegar e retornar são operações distintas:
+
+```text
+navigate               nova etapa do percurso
+back                   retorno à etapa imediatamente anterior
+breadcrumb navigation  retorno explícito a uma posição anterior do percurso
+```
+
+Revisitar uma estrutura é navegação legítima: o mesmo BiologicalNode pode aparecer repetidamente no breadcrumb (`human › nervous-system › brain › nervous-system`). Por isso o retorno por breadcrumb identifica uma posição do percurso, e não um ID de nó, e descarta as etapas posteriores a ela.
+
+Relações biológicas não são rotas: o NavigationController aceita qualquer nó existente e expõe as relações do nó atual apenas para consulta. Quais destinos cada estrutura oferece é decisão da definição da experiência/cena.
+
+Um deep link inicia a navegação diretamente no nó indicado, com histórico vazio; nenhum percurso é fabricado.
 
 ---
 
@@ -759,11 +787,16 @@ O objetivo é criar **continuidade perceptiva**, não escala física literal.
 
 # 16. Scale Engine
 
-Cada estrutura deverá possuir metadados aproximados de escala.
+Estruturas poderão possuir metadados aproximados de escala, quando houver base científica adequada.
 
 ```ts
-interface Scale {
-  magnitude: number
+type Scale = {
+  dimension:
+    | "diameter"
+    | "length"
+    | "width"
+    | "thickness"
+    | "height"
 
   unit:
     | "m"
@@ -771,8 +804,17 @@ interface Scale {
     | "mm"
     | "µm"
     | "nm"
-}
+} & (
+  | { value: number }
+  | { min: number; max: number }
+)
 ```
+
+`dimension` declara o que é medido: 2 nm de diâmetro e 2 nm de comprimento são informações diferentes.
+
+Um valor único usa `value`. Estruturas cuja dimensão varia usam o intervalo `min`/`max`, com `min < max`. Os dois formatos são mutuamente exclusivos.
+
+Não se deve atribuir um valor absoluto único a estruturas cuja dimensão varia significativamente.
 
 A interface poderá mostrar:
 
@@ -945,10 +987,31 @@ interface EducationalContent {
   relatedConcepts?: string[]
 
   sources: ScientificReference[]
+
+  reviewStatus:
+    | "draft"
+    | "pending_review"
+    | "approved"
+}
+
+interface ScientificReference {
+  id: string
+
+  citation: string
+
+  url?: string
+
+  doi?: string
+
+  accessedOn?: string // ISO 8601, YYYY-MM-DD
 }
 ```
 
 Todo conteúdo científico deverá possuir referências.
+
+`EducationalContent` é a única fonte de texto científico de um nó.
+
+Fontes web deverão registrar a data de acesso em `accessedOn`.
 
 ---
 
@@ -969,6 +1032,16 @@ Approved Content
       ↓
 Production
 ```
+
+O estado do conteúdo é representado por `reviewStatus`:
+
+```text
+draft           em elaboração
+pending_review  fundamentado em fontes, aguardando revisão biológica
+approved        revisado e aprovado para produção
+```
+
+Conteúdo não revisado por especialista não deverá ser marcado como `approved`.
 
 Conteúdo visual também deverá ser validado.
 
@@ -1140,6 +1213,8 @@ DNA
 ```
 
 Não será necessário implementar todo o corpo humano inicialmente.
+
+`Brain` designa o encéfalo inteiro (`brain`): cérebro, diencéfalo, tronco encefálico e cerebelo. Em português, "cérebro" corresponde apenas ao *cerebrum*, uma das regiões do encéfalo. Regiões como `cerebrum`, `cerebellum` e `brainstem`, se modeladas no futuro, serão nós próprios relacionados a `brain`.
 
 ---
 

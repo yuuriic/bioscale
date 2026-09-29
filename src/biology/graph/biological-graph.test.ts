@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BiologicalNode } from "./biological-node";
+import type { EducationalContent } from "./educational-content";
+import { isScaleRange, type Scale } from "./scale";
 import {
   BiologicalGraphValidationError,
   createBiologicalGraph,
@@ -12,7 +14,6 @@ function node(overrides: Partial<BiologicalNode> & Pick<BiologicalNode, "id">): 
     name: overrides.id,
     domain: "cellular",
     type: "cell",
-    description: "fixture",
     relations: [],
     ...overrides,
   };
@@ -92,16 +93,13 @@ describe("validateBiologicalNodes", () => {
     expect(validateBiologicalNodes(nodes)).toEqual([]);
   });
 
-  it("reports non-positive scale magnitudes", () => {
-    expect(
-      validateBiologicalNodes([node({ id: "a", scale: { magnitude: 0, unit: "µm" } })]),
-    ).toEqual([{ code: "invalid_scale", nodeId: "a" }]);
-  });
-
   it("reports educational content without references", () => {
     expect(
       validateBiologicalNodes([
-        node({ id: "a", educationalContent: { summary: "fixture", sources: [] } }),
+        node({
+          id: "a",
+          educationalContent: { summary: "fixture", sources: [], reviewStatus: "draft" },
+        }),
       ]),
     ).toEqual([{ code: "missing_references", nodeId: "a" }]);
   });
@@ -187,5 +185,89 @@ describe("relation direction", () => {
     expect(graph.getOutgoingRelations("inner")).toEqual([]);
     const all = graph.nodes.flatMap((n) => graph.getOutgoingRelations(n.id));
     expect(all.some((r) => r.type === "part_of")).toBe(false);
+  });
+});
+
+describe("scale", () => {
+  const issuesFor = (scale: Scale) => validateBiologicalNodes([node({ id: "a", scale })]);
+
+  it("accepts a single value", () => {
+    expect(issuesFor({ dimension: "diameter", value: 2, unit: "nm" })).toEqual([]);
+  });
+
+  it("accepts a valid range", () => {
+    expect(issuesFor({ dimension: "length", min: 1, max: 20, unit: "µm" })).toEqual([]);
+  });
+
+  it.each([
+    ["inverted", { dimension: "length", min: 20, max: 1, unit: "µm" }],
+    ["degenerate", { dimension: "length", min: 5, max: 5, unit: "µm" }],
+    ["non-positive", { dimension: "length", min: 0, max: 5, unit: "µm" }],
+  ] as const)("rejects a %s range", (_, scale) => {
+    expect(issuesFor(scale)).toEqual([{ code: "invalid_scale", nodeId: "a" }]);
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("rejects the value %s", (value) => {
+    expect(issuesFor({ dimension: "width", value, unit: "mm" })).toEqual([
+      { code: "invalid_scale", nodeId: "a" },
+    ]);
+  });
+
+  it("preserves the measured dimension, so equal numbers stay distinguishable", () => {
+    const diameter: Scale = { dimension: "diameter", value: 2, unit: "nm" };
+    const length: Scale = { dimension: "length", value: 2, unit: "nm" };
+    const graph = createBiologicalGraph([
+      node({ id: "d", scale: diameter }),
+      node({ id: "l", scale: length }),
+    ]);
+    expect(graph.getNode("d")?.scale?.dimension).toBe("diameter");
+    expect(graph.getNode("l")?.scale?.dimension).toBe("length");
+    expect(isScaleRange(diameter)).toBe(false);
+    expect(isScaleRange({ dimension: "length", min: 1, max: 2, unit: "nm" })).toBe(true);
+  });
+
+  it("does not allow a single value and a range at the same time", () => {
+    // @ts-expect-error value e intervalo são mutuamente exclusivos
+    const mixed: Scale = { dimension: "length", value: 2, min: 1, max: 3, unit: "nm" };
+    expect(mixed).toBeDefined();
+  });
+});
+
+describe("scientific references", () => {
+  const withReference = (accessedOn: string) =>
+    node({
+      id: "a",
+      educationalContent: {
+        summary: "fixture",
+        reviewStatus: "draft",
+        sources: [{ id: "ref", citation: "fixture", url: "https://example.org", accessedOn }],
+      },
+    });
+
+  it("accepts an ISO 8601 access date", () => {
+    expect(validateBiologicalNodes([withReference("2024-02-29")])).toEqual([]);
+  });
+
+  it.each(["2023-02-29", "2024-13-01", "29/02/2024", "2024-2-9", "2024-02-29T00:00:00Z"])(
+    "rejects the access date %s",
+    (accessedOn) => {
+      expect(validateBiologicalNodes([withReference(accessedOn)])).toEqual([
+        { code: "invalid_reference_access_date", nodeId: "a", referenceId: "ref" },
+      ]);
+    },
+  );
+});
+
+describe("contracts", () => {
+  it("keeps scientific text out of BiologicalNode", () => {
+    // @ts-expect-error texto científico pertence a EducationalContent
+    const withDescription: BiologicalNode = { ...node({ id: "a" }), description: "text" };
+    expect(withDescription).toBeDefined();
+  });
+
+  it("requires a review status on educational content", () => {
+    // @ts-expect-error reviewStatus é obrigatório
+    const content: EducationalContent = { summary: "fixture", sources: [] };
+    expect(content).toBeDefined();
   });
 });

@@ -19,17 +19,27 @@ export type BiologicalDomain = keyof typeof NODE_TYPES_BY_DOMAIN;
 export type BiologicalNodeType<D extends BiologicalDomain = BiologicalDomain> =
   (typeof NODE_TYPES_BY_DOMAIN)[D][number];
 
-/** Nó do Biological Graph (ARCHITECTURE.md §7). */
+/**
+ * Nó do Biological Graph (ARCHITECTURE.md §7).
+ *
+ * O nó carrega identidade, classificação e relações. Texto científico
+ * pertence exclusivamente a `educationalContent`, que exige referências.
+ */
 export interface BiologicalNode {
+  /** Identidade científica estável, em slug inglês; usada em URLs e no grafo. */
   readonly id: string;
+  /** Rótulo de exibição em um único idioma (atualmente português). */
   readonly name: string;
   readonly scientificName?: string;
   readonly domain: BiologicalDomain;
   readonly type: BiologicalNodeType;
-  readonly description: string;
   readonly scale?: Scale;
   readonly model?: AssetReference;
   readonly educationalContent?: EducationalContent;
+  /**
+   * Relações declaradas. A lista não é exaustiva: a ausência de uma relação
+   * no dataset não significa sua ausência na biologia.
+   */
   readonly relations: readonly BiologicalRelation[];
 }
 

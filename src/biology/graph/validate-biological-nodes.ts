@@ -1,11 +1,18 @@
 import { isNodeTypeOfDomain, type BiologicalNode } from "./biological-node";
 import type { BiologicalRelation } from "./biological-relation";
+import { isValidScale } from "./scale";
+import { isIsoCalendarDate } from "./scientific-reference";
 
 export type BiologicalGraphIssue =
   | { readonly code: "duplicate_node_id"; readonly nodeId: string }
   | { readonly code: "domain_type_mismatch"; readonly nodeId: string }
   | { readonly code: "invalid_scale"; readonly nodeId: string }
   | { readonly code: "missing_references"; readonly nodeId: string }
+  | {
+      readonly code: "invalid_reference_access_date";
+      readonly nodeId: string;
+      readonly referenceId: string;
+    }
   | {
       readonly code: "relation_source_mismatch";
       readonly nodeId: string;
@@ -27,7 +34,7 @@ export type BiologicalGraphIssue =
  * Verifica a integridade estrutural de um conjunto de nós.
  *
  * Não valida conteúdo científico — apenas a consistência exigida pelo
- * modelo (ARCHITECTURE.md §4, §7, §8, §16 e §22). Pressupõe entrada já
+ * modelo (ARCHITECTURE.md §4, §7, §8, §16, §22 e §23). Pressupõe entrada já
  * tipada: dados vindos de JSON/CMS exigirão validação de esquema antes.
  */
 export function validateBiologicalNodes(
@@ -48,12 +55,22 @@ export function validateBiologicalNodes(
       issues.push({ code: "domain_type_mismatch", nodeId: node.id });
     }
 
-    if (node.scale && !(Number.isFinite(node.scale.magnitude) && node.scale.magnitude > 0)) {
+    if (node.scale && !isValidScale(node.scale)) {
       issues.push({ code: "invalid_scale", nodeId: node.id });
     }
 
     if (node.educationalContent && node.educationalContent.sources.length === 0) {
       issues.push({ code: "missing_references", nodeId: node.id });
+    }
+
+    for (const reference of node.educationalContent?.sources ?? []) {
+      if (reference.accessedOn !== undefined && !isIsoCalendarDate(reference.accessedOn)) {
+        issues.push({
+          code: "invalid_reference_access_date",
+          nodeId: node.id,
+          referenceId: reference.id,
+        });
+      }
     }
 
     const declared = new Set<string>();

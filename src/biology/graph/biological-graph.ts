@@ -13,6 +13,10 @@ import {
  * alcançável a partir de vários pais). Nenhuma relação inversa é inferida:
  * `getIncomingRelations` devolve as relações declaradas, com `source`
  * original, e não relações sintéticas como `part_of`.
+ *
+ * O grafo não é exaustivo: consultas devolvem apenas o conhecimento
+ * declarado. Uma lista vazia ou curta não representa a estrutura biológica
+ * completa.
  */
 export interface BiologicalGraph {
   readonly nodes: readonly BiologicalNode[];
