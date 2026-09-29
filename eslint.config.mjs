@@ -48,15 +48,22 @@ const layersGroup = (...names) => ({
 
 const UPPER_LAYERS = ["app", "components", "experience", "store", "hooks"];
 
+// Módulos da experiência em TypeScript puro: estado e contratos declarativos
+// que dependem do grafo por injeção, nunca do dataset concreto.
+const PURE_EXPERIENCE = [
+  "experience/navigation",
+  "experience/scenes",
+  "experience/camera",
+  "experience/selection",
+  "experience/engine",
+].map((name) => `src/${name}/**/*.{ts,tsx}`);
+
 // Camadas independentes de plataforma: além de imports, não podem tocar
 // DOM/WebGL através de globais nem de tipos da lib "dom".
 const PLATFORM_FREE = [
-  "types",
-  "utils",
-  "content",
-  "biology",
-  "experience/navigation",
-].map((name) => `src/${name}/**/*.{ts,tsx}`);
+  ...["types", "utils", "content", "biology"].map((name) => `src/${name}/**/*.{ts,tsx}`),
+  ...PURE_EXPERIENCE,
+];
 
 const PLATFORM_GLOBALS = [
   "window",
@@ -160,10 +167,9 @@ export default defineConfig([
       "no-restricted-imports": restrict(layersGroup("app", "components")),
     },
   },
-  // NavigationController é TypeScript puro: depende do grafo por injeção,
-  // nunca do dataset concreto. Testes de integração podem importar content.
+  // Testes de integração podem importar content.
   {
-    files: ["src/experience/navigation/**/*.{ts,tsx}"],
+    files: PURE_EXPERIENCE,
     rules: {
       "no-restricted-imports": restrict(
         frameworkGroup,
@@ -172,7 +178,7 @@ export default defineConfig([
     },
   },
   {
-    files: ["src/experience/navigation/**/*.{ts,tsx}"],
+    files: PURE_EXPERIENCE,
     ignores: ["**/*.test.ts"],
     rules: {
       "no-restricted-imports": restrict(

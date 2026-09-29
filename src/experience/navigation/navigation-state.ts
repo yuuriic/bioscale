@@ -15,7 +15,5 @@ export interface NavigationState {
    * percurso da sessão (breadcrumbs).
    */
   readonly history: readonly string[];
-  /** Seleção dentro da estrutura atual; limpa sempre que `currentNode` muda. */
-  readonly selectedNode?: string;
   readonly mode: NavigationMode;
 }

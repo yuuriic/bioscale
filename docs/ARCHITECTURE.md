@@ -537,8 +537,6 @@ interface NavigationState {
 
   history: string[]
 
-  selectedNode?: string
-
   mode:
     | "guided"
     | "explore"
@@ -580,21 +578,33 @@ Nenhum componente biológico deverá controlar diretamente a câmera.
 
 Toda movimentação deverá passar pelo CameraController.
 
+O CameraController é independente de framework e mantém o estado **lógico** da câmera; a Rendering Layer o aplicará à câmera real.
+
+```text
+CameraController → Rendering Adapter → Three.js Camera
+```
+
+```ts
+interface CameraState {
+  position: Vec3 // Scene Units
+  target: Vec3 // Scene Units
+  fieldOfView: number // graus, vertical, 0 < fov < 180
+}
+```
+
+O estado é sempre completo: quando o preset da cena omite `fieldOfView`, aplica-se um valor padrão, que é convenção visual do BioScale e não dado científico. `near`, `far`, aspect ratio e rotação pertencem à integração com a renderização.
+
+**Scene Unit (SU)** é a unidade abstrata do espaço 3D da experiência. Não corresponde a metro, milímetro, nanômetro ou qualquer unidade física, e não é convertida automaticamente a partir de `BiologicalNode.scale`: cada cena normaliza sua representação visual. Um DNA de cerca de 2 nm de diâmetro pode ocupar várias SU. A magnitude real é comunicada por `Scale` (§16), não pelas coordenadas da cena.
+
+`target` representa o foco espacial abstrato atual. Foco em objetos (em um nó ou mesh) foi adiado até existir informação espacial dos assets. Zoom também foi adiado: sem decidir se significa mover a câmera, alterar o campo de visão ou reescalar a cena, a operação seria ambígua.
+
+O CameraController aplica mudanças imediatamente e não anima. Cada estado é um snapshot imutável; a interpolação entre o estado anterior e o seguinte pertence ao TransitionController e à integração com a renderização.
+
 ---
 
 ## 11.3 SelectionController
 
-Responsável por:
-
-```text
-raycasting
-hover
-selection
-highlight
-interactive meshes
-```
-
-Fluxo:
+Fluxo de seleção:
 
 ```text
 Pointer
@@ -613,6 +623,64 @@ Selection
 O nome do mesh não deverá ser utilizado como única fonte de informação científica.
 
 Cada mesh interativo deverá possuir um identificador associado ao Biological Graph.
+
+Responsabilidades separadas:
+
+```text
+NavigationController   estado do percurso
+SelectionController    estado da entidade selecionada
+```
+
+O SelectionController mantém apenas a seleção lógica: o ID de um BiologicalNode existente no grafo, ou nenhuma seleção. É independente de framework e não conhece o NavigationController.
+
+- Seleção não implica navegação: selecionar uma estrutura não entra na sua cena.
+- Navegação não implica seleção: entrar em uma cena não seleciona a estrutura.
+- Nenhum dos dois controllers limpa a seleção do outro. Quando a mudança de experiência passa pelo ExperienceController (§11.4), ele coordena a limpeza: `enter` limpa sempre, inclusive em reentrada; `back` e `returnToBreadcrumb` limpam somente quando mudam a posição. Operações sem efeito ou que falham antes da mudança preservam a seleção.
+- A tradução mesh → BiologicalNode ID (raycasting e objetos interativos) será resolvida na integração com assets e renderização; o SelectionController recebe o ID já resolvido.
+- Se um nó é selecionável na cena atual é decisão futura da cena; hoje qualquer nó existente pode ser a seleção lógica.
+- Hover é estado transitório de interação e não faz parte da seleção. Highlight é a representação visual da seleção e pertence à renderização.
+
+---
+
+## 11.4 ExperienceController
+
+Camada mínima de orquestração. Cada peça mantém uma única responsabilidade:
+
+```text
+NavigationController   percurso
+SelectionController    seleção
+CameraController       enquadramento
+SceneRegistry          definições de cena disponíveis
+ExperienceController   coordenação da entrada lógica em uma cena
+```
+
+O ExperienceController coordena três mudanças de cena, todas com o mesmo fluxo:
+
+```text
+enter(nodeId) | back() | returnToBreadcrumb(index)
+  → resolve o destino e sua SceneDefinition
+  → navigate | back | returnToBreadcrumb
+  → clearSelection
+  → apply CameraPreset
+```
+
+O destino é resolvido antes de qualquer mutação, a partir do estado público do NavigationController: o último item do histórico para `back`, a posição do breadcrumb para o retorno (a posição identifica a ocorrência, mesmo com nós repetidos). A validade do índice é a mesma regra da navegação, compartilhada por ela.
+
+Reentrada e ausência de mudança são intenções distintas:
+
+```text
+enter(nó atual)                  reentrada explícita: limpa a seleção e reaplica a câmera
+back() sem histórico             nenhuma mudança
+returnToBreadcrumb(posição atual) nenhuma mudança
+```
+
+- Sem SceneDefinition para o destino, a operação falha (`SceneNotAvailableError`) antes de qualquer mutação. Isso não é o mesmo que um BiologicalNode inexistente: o ExperienceController não consulta o grafo e apenas informa que não há experiência visual disponível. Como os controllers seguem utilizáveis diretamente, o percurso pode conter nós sem cena; voltar para eles também falha sem mutação.
+- Um índice de breadcrumb inválido falha com o mesmo erro da navegação, sem mutação.
+- Toda mudança de cena efetiva limpa a seleção, e o preset da cena de destino passa a ser a base do reset da câmera.
+- A construção não altera os controllers recebidos. O estado inicial pertence à composição externa.
+- O ExperienceController não possui estado nem histórico próprios: o NavigationController é a única fonte do percurso, e todos os controllers continuam utilizáveis diretamente, inclusive `back` e `returnToBreadcrumb` da navegação.
+- Não há rollback. A navegação é a primeira mutação e falha antes de alterar estado; `clearSelection` não falha; e `applyPreset` não falha para cenas de um SceneRegistry validado, que usa a mesma regra de câmera do CameraController. Outra implementação de SceneRegistry precisa preservar essa invariante.
+- As mudanças são lógicas e imediatas. Transições visuais (preparar destino → transição → consolidar estado visual) continuam adiadas até existir renderização.
 
 ---
 
@@ -879,24 +947,45 @@ Todos utilizarão o mesmo renderer.
 # 19. Scene Definition
 
 ```ts
+type Vec3 = readonly [number, number, number]
+
 interface SceneDefinition {
   nodeId: string
 
-  asset: AssetReference
+  assets: AssetReference[]
 
-  camera: CameraPreset
+  camera: {
+    position: Vec3 // Scene Units (§11.2)
+    target: Vec3
+    fieldOfView?: number // graus, vertical
+  }
 
-  interactiveObjects: InteractiveObject[]
+  layers: { id: string; label: string }[]
 
-  transitions: TransitionDefinition[]
-
-  layers?: LayerDefinition[]
-
-  explodedView?: ExplodedView
+  capabilities: (
+    | "rotate"
+    | "zoom"
+    | "select"
+    | "isolate"
+    | "transparent"
+    | "explode"
+  )[]
 }
 ```
 
 Assim, comportamento e conteúdo ficam desacoplados.
+
+`BiologicalNode` descreve o que a estrutura é; `SceneDefinition` descreve como ela participa da experiência; a Asset Layer resolve os recursos; a Rendering Layer os renderiza. A definição é declarativa e serializável: sem objetos de renderização, funções ou parâmetros de animação.
+
+Há no máximo uma cena por nó, e toda cena aponta para um nó existente. Um nó pode existir sem cena: o grafo pode conter conhecimento que ainda não possui experiência visual.
+
+As capacidades vêm das interações do MVP (§30) e dos controles de camadas (§13). Ações narrativas próprias de uma estrutura (ex.: revelar cromatina) não são capacidades genéricas.
+
+Ainda não fazem parte do contrato, até existirem assets e decisões visuais que os definam:
+
+- objetos interativos (associação mesh → `BiologicalNode`, §11.3);
+- configuração de exploded view (§14);
+- transições: o §15 descreve um único fluxo genérico executado pelo Experience Engine, e não estratégias distintas declaradas por cena.
 
 ---
 

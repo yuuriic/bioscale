@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { createBiologicalGraph } from "@/biology/graph/biological-graph";
 import type { BiologicalNode } from "@/biology/graph/biological-node";
+import { UnknownBiologicalNodeError } from "@/biology/graph/unknown-biological-node-error";
 import {
   InvalidBreadcrumbIndexError,
   NavigationController,
-  UnknownBiologicalNodeError,
+  breadcrumbAt,
 } from "./navigation-controller";
+import type { NavigationState } from "./navigation-state";
 
 // Grafo estrutural neutro: não representa dados científicos. `d` é
 // alcançável por dois caminhos (a → b → d e a → c → d); `e` está isolado.
@@ -42,7 +44,7 @@ function walk(nav: NavigationController, ...ids: string[]): NavigationController
 }
 
 describe("NavigationController initialization", () => {
-  it("starts at the default node in guided mode, without history or selection", () => {
+  it("starts at the default node in guided mode, without history", () => {
     const nav = controller();
     expect(nav.getState()).toEqual({ currentNode: "a", history: [], mode: "guided" });
     expect(nav.getBreadcrumbs()).toEqual(["a"]);
@@ -97,14 +99,12 @@ describe("NavigationController navigation", () => {
 
   it("treats navigation to the current node as a no-op", () => {
     const nav = walk(controller(), "b");
-    nav.select("d");
     const before = nav.getState();
 
     nav.navigate("b");
 
     expect(nav.getState()).toBe(before);
     expect(nav.getState().history).toEqual(["a"]);
-    expect(nav.getState().selectedNode).toBe("d");
   });
 
   it("keeps the traversed nodes in order, without the current node", () => {
@@ -116,13 +116,6 @@ describe("NavigationController navigation", () => {
   it("revisits a node already in the history as a new step of the path", () => {
     const nav = walk(controller(), "b", "d", "a");
     expect(nav.getState()).toEqual({ currentNode: "a", history: ["a", "b", "d"], mode: "guided" });
-  });
-
-  it("clears the selection when revisiting a node", () => {
-    const nav = walk(controller(), "b");
-    nav.select("d");
-    nav.navigate("a");
-    expect(nav.getState().selectedNode).toBeUndefined();
   });
 });
 
@@ -213,21 +206,12 @@ describe("NavigationController breadcrumb navigation", () => {
 
   it("treats the current position as a no-op, even when the node repeats earlier", () => {
     const nav = walk(controller(), "b", "a");
-    nav.select("d");
     const before = nav.getState();
 
     nav.returnToBreadcrumb(2);
 
     expect(nav.getState()).toBe(before);
     expect(nav.getState().history).toEqual(["a", "b"]);
-    expect(nav.getState().selectedNode).toBe("d");
-  });
-
-  it("clears the selection when returning to an earlier position", () => {
-    const nav = walk(controller(), "b", "d");
-    nav.select("c");
-    nav.returnToBreadcrumb(0);
-    expect(nav.getState().selectedNode).toBeUndefined();
   });
 
   it.each([
@@ -238,7 +222,6 @@ describe("NavigationController breadcrumb navigation", () => {
     ["infinite", Number.POSITIVE_INFINITY],
   ])("rejects an index that is %s and keeps the state intact", (_, index) => {
     const nav = walk(controller(), "b", "d");
-    nav.select("c");
     const before = nav.getState();
 
     let error: unknown;
@@ -262,49 +245,36 @@ describe("NavigationController breadcrumb navigation", () => {
   });
 });
 
-describe("NavigationController selection", () => {
-  it("selects an existing node", () => {
-    const nav = controller();
-    nav.select("b");
-    expect(nav.getState().selectedNode).toBe("b");
-  });
-
-  it("rejects an unknown node and keeps the previous selection", () => {
-    const nav = controller();
-    nav.select("b");
+describe("breadcrumbAt", () => {
+  it("resolves a position without mutating anything, rejecting the same indexes", () => {
+    const nav = walk(controller(), "b", "a", "c");
+    const breadcrumbs = nav.getBreadcrumbs();
     const before = nav.getState();
 
-    expect(() => nav.select("missing")).toThrow(UnknownBiologicalNodeError);
+    expect(breadcrumbAt(breadcrumbs, 0)).toBe("a");
+    expect(breadcrumbAt(breadcrumbs, 2)).toBe("a");
+    expect(breadcrumbAt(breadcrumbs, 3)).toBe("c");
+    for (const index of [-1, 4, 0.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => breadcrumbAt(breadcrumbs, index)).toThrow(InvalidBreadcrumbIndexError);
+      expect(() => nav.returnToBreadcrumb(index)).toThrow(InvalidBreadcrumbIndexError);
+    }
     expect(nav.getState()).toBe(before);
   });
+});
 
-  it("clears the selection", () => {
+describe("NavigationController responsibility", () => {
+  it("does not hold selection state; selection belongs to SelectionController", () => {
+    expectTypeOf<NavigationState>().not.toHaveProperty("selectedNode");
+
     const nav = controller();
-    nav.select("b");
-    nav.clearSelection();
-    expect(nav.getState()).toEqual({ currentNode: "a", history: [], mode: "guided" });
-    expect("selectedNode" in nav.getState()).toBe(false);
-  });
+    expect("select" in nav).toBe(false);
+    expect("clearSelection" in nav).toBe(false);
 
-  it("is cleared when navigating to another node", () => {
-    const nav = controller();
-    nav.select("b");
-    nav.navigate("b");
-    expect(nav.getState().selectedNode).toBeUndefined();
-  });
-
-  it("is cleared when going back", () => {
-    const nav = walk(controller(), "b");
-    nav.select("d");
+    walk(nav, "b", "d");
     nav.back();
-    expect(nav.getState().selectedNode).toBeUndefined();
-  });
-
-  it("is preserved when the mode changes", () => {
-    const nav = controller();
-    nav.select("b");
+    nav.returnToBreadcrumb(0);
     nav.setMode("explore");
-    expect(nav.getState().selectedNode).toBe("b");
+    expect(Object.keys(nav.getState()).sort()).toEqual(["currentNode", "history", "mode"]);
   });
 });
 

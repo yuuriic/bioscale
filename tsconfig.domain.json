@@ -11,7 +11,11 @@
     "src/content/**/*.ts",
     "src/types/**/*.ts",
     "src/utils/**/*.ts",
-    "src/experience/navigation/**/*.ts"
+    "src/experience/navigation/**/*.ts",
+    "src/experience/scenes/**/*.ts",
+    "src/experience/camera/**/*.ts",
+    "src/experience/selection/**/*.ts",
+    "src/experience/engine/**/*.ts"
   ],
   "exclude": ["node_modules", "src/**/*.test.ts"]
 }

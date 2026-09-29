@@ -1,16 +1,7 @@
 import type { BiologicalGraph } from "@/biology/graph/biological-graph";
 import type { BiologicalRelation } from "@/biology/graph/biological-relation";
+import { UnknownBiologicalNodeError } from "@/biology/graph/unknown-biological-node-error";
 import type { NavigationMode, NavigationState } from "./navigation-state";
-
-export class UnknownBiologicalNodeError extends Error {
-  readonly nodeId: string;
-
-  constructor(nodeId: string) {
-    super(`Biological node "${nodeId}" does not exist in the graph.`);
-    this.name = "UnknownBiologicalNodeError";
-    this.nodeId = nodeId;
-  }
-}
 
 export class InvalidBreadcrumbIndexError extends Error {
   readonly index: number;
@@ -22,6 +13,20 @@ export class InvalidBreadcrumbIndexError extends Error {
     this.name = "InvalidBreadcrumbIndexError";
     this.index = index;
   }
+}
+
+/**
+ * Nó na posição `index` de um percurso de breadcrumbs (`history` seguido de
+ * `currentNode`). Uma posição inválida (não inteira, negativa ou além do
+ * último breadcrumb) lança `InvalidBreadcrumbIndexError`. Função pura: permite
+ * resolver o destino de um retorno antes de qualquer mutação.
+ */
+export function breadcrumbAt(breadcrumbs: readonly string[], index: number): string {
+  const nodeId = Number.isInteger(index) && index >= 0 ? breadcrumbs[index] : undefined;
+  if (nodeId === undefined) {
+    throw new InvalidBreadcrumbIndexError(index, breadcrumbs.length);
+  }
+  return nodeId;
 }
 
 export interface NavigationControllerOptions {
@@ -58,9 +63,10 @@ export interface CurrentNodeRelations {
  * - navegar para o nó atual, ou retornar à posição atual, não altera o
  *   estado;
  * - `back` sem histórico não altera o estado;
- * - toda mudança de `currentNode` limpa `selectedNode`, que pertence à
- *   estrutura anterior;
  * - `mode` é apenas estado nesta etapa.
+ *
+ * Seleção não pertence à navegação (SelectionController). Limpar a seleção
+ * ao trocar de estrutura cabe ao ExperienceController.
  */
 export class NavigationController {
   readonly #graph: BiologicalGraph;
@@ -103,12 +109,8 @@ export class NavigationController {
    */
   returnToBreadcrumb(index: number): void {
     const { history } = this.#state;
-    const breadcrumbCount = history.length + 1;
-    if (!Number.isInteger(index) || index < 0 || index >= breadcrumbCount) {
-      throw new InvalidBreadcrumbIndexError(index, breadcrumbCount);
-    }
-    const target = history[index];
-    if (target === undefined) {
+    const target = breadcrumbAt(this.getBreadcrumbs(), index);
+    if (index === history.length) {
       return;
     }
     this.#moveTo(target, history.slice(0, index));
@@ -116,16 +118,6 @@ export class NavigationController {
 
   canGoBack(): boolean {
     return this.#state.history.length > 0;
-  }
-
-  select(nodeId: string): void {
-    this.#assertNodeExists(nodeId);
-    this.#state = freezeState({ ...this.#state, selectedNode: nodeId });
-  }
-
-  clearSelection(): void {
-    const { currentNode, history, mode } = this.#state;
-    this.#state = freezeState({ currentNode, history, mode });
   }
 
   setMode(mode: NavigationMode): void {
@@ -149,7 +141,6 @@ export class NavigationController {
     });
   }
 
-  /** Muda o nó atual; a seleção pertence à estrutura anterior e é limpa. */
   #moveTo(currentNode: string, history: readonly string[]): void {
     this.#state = freezeState({ currentNode, history, mode: this.#state.mode });
   }
