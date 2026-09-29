@@ -1,4 +1,3 @@
-import type { AssetReference } from "@/types/asset-reference";
 import type { BiologicalRelation } from "./biological-relation";
 import type { EducationalContent } from "./educational-content";
 import type { Scale } from "./scale";
@@ -23,7 +22,9 @@ export type BiologicalNodeType<D extends BiologicalDomain = BiologicalDomain> =
  * Nó do Biological Graph (ARCHITECTURE.md §7).
  *
  * O nó carrega identidade, classificação e relações. Texto científico
- * pertence exclusivamente a `educationalContent`, que exige referências.
+ * pertence exclusivamente a `educationalContent`, que exige referências. O
+ * nó não referencia representação visual: a composição visual pertence à
+ * SceneDefinition.
  */
 export interface BiologicalNode {
   /** Identidade científica estável, em slug inglês; usada em URLs e no grafo. */
@@ -34,7 +35,6 @@ export interface BiologicalNode {
   readonly domain: BiologicalDomain;
   readonly type: BiologicalNodeType;
   readonly scale?: Scale;
-  readonly model?: AssetReference;
   readonly educationalContent?: EducationalContent;
   /**
    * Relações declaradas. A lista não é exaustiva: a ausência de uma relação

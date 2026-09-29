@@ -12,6 +12,12 @@ export type SceneRegistryIssue =
   | { readonly code: "duplicate_scene_node"; readonly nodeId: string }
   | { readonly code: "duplicate_asset"; readonly nodeId: string; readonly assetId: string }
   | { readonly code: "duplicate_layer"; readonly nodeId: string; readonly layerId: string }
+  | {
+      readonly code: "unknown_asset_layer";
+      readonly nodeId: string;
+      readonly assetId: string;
+      readonly layerId: string;
+    }
   | { readonly code: "unknown_capability"; readonly nodeId: string; readonly capability: string }
   | {
       readonly code: "duplicate_capability";
@@ -46,8 +52,9 @@ const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set(SCENE_CAPABILITIES);
 /**
  * Verifica a consistência de um conjunto de cenas contra o grafo: cada cena
  * aponta para um nó existente, há no máximo uma cena por nó e os dados
- * declarativos são coerentes. Não verifica se os assets existem; isso
- * pertence à camada de assets.
+ * declarativos são coerentes, incluindo que cada asset aparece uma única vez
+ * e que a layer declarada por um asset existe na cena. Não verifica se os
+ * assets existem; isso pertence à camada de assets.
  */
 export function validateSceneDefinitions(
   scenes: readonly SceneDefinition[],
@@ -71,6 +78,12 @@ export function validateSceneDefinitions(
     }
     for (const layerId of duplicates(scene.layers.map((layer) => layer.id))) {
       issues.push({ code: "duplicate_layer", nodeId, layerId });
+    }
+    const layerIds = new Set(scene.layers.map((layer) => layer.id));
+    for (const { assetId, layerId } of scene.assets) {
+      if (layerId !== undefined && !layerIds.has(layerId)) {
+        issues.push({ code: "unknown_asset_layer", nodeId, assetId, layerId });
+      }
     }
     for (const capability of scene.capabilities) {
       if (!KNOWN_CAPABILITIES.has(capability)) {
@@ -132,7 +145,11 @@ function freezeScene(scene: SceneDefinition): SceneDefinition {
   const { position, target, fieldOfView } = scene.camera;
   return Object.freeze({
     nodeId: scene.nodeId,
-    assets: Object.freeze(scene.assets.map(({ assetId }) => Object.freeze({ assetId }))),
+    assets: Object.freeze(
+      scene.assets.map(({ assetId, layerId }) =>
+        Object.freeze(layerId === undefined ? { assetId } : { assetId, layerId }),
+      ),
+    ),
     camera: Object.freeze({
       position: freezeVec3(position),
       target: freezeVec3(target),

@@ -41,6 +41,17 @@ export interface VisualLayer {
 }
 
 /**
+ * Entrada de um asset na composição visual da cena: a identidade opaca do
+ * asset (`AssetReference`) e, opcionalmente, a VisualLayer da cena a que ele
+ * pertence. Sem `layerId`, o asset é conteúdo base da cena, fora das layers
+ * controláveis. Cada asset pertence a no máximo uma layer da cena.
+ */
+export interface SceneAsset extends AssetReference {
+  /** Layer desta cena que contém o asset; deve existir em `layers`. */
+  readonly layerId?: string;
+}
+
+/**
  * Como um BiologicalNode participa da experiência (ARCHITECTURE.md §19).
  *
  * Dados declarativos e serializáveis: sem funções, objetos de renderização
@@ -50,8 +61,12 @@ export interface VisualLayer {
 export interface SceneDefinition {
   /** BiologicalNode representado; no máximo uma cena por nó. */
   readonly nodeId: string;
-  /** Recursos visuais necessários, resolvidos pela camada de assets. */
-  readonly assets: readonly AssetReference[];
+  /**
+   * Composição visual da cena: os assets que dela participam e a layer de
+   * cada um. É a autoridade da composição, não uma lista de preload nem um
+   * catálogo; resolver cada asset pertence à camada de assets.
+   */
+  readonly assets: readonly SceneAsset[];
   readonly camera: CameraPreset;
   /** Camadas oferecidas; vazio quando a cena não possui camadas. */
   readonly layers: readonly VisualLayer[];

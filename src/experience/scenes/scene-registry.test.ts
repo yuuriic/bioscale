@@ -1,9 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { createBiologicalGraph } from "@/biology/graph/biological-graph";
 import type { BiologicalNode } from "@/biology/graph/biological-node";
-import type { SceneDefinition } from "./scene-definition";
+import type { AssetReference } from "@/types/asset-reference";
+import type { SceneAsset, SceneDefinition } from "./scene-definition";
 import {
   SceneRegistryValidationError,
   createSceneRegistry,
@@ -168,6 +169,74 @@ describe("SceneRegistry", () => {
   });
 });
 
+describe("scene asset composition", () => {
+  const withLayers = (assets: readonly SceneAsset[]) =>
+    scene({
+      nodeId: "a",
+      assets,
+      layers: [
+        { id: "outer", label: "Externa" },
+        { id: "inner", label: "Interna" },
+      ],
+    });
+
+  it("accepts an asset without a layer as base content", () => {
+    expect(issuesOf([withLayers([{ assetId: "base" }])])).toEqual([]);
+  });
+
+  it("accepts an asset in an existing layer", () => {
+    expect(issuesOf([withLayers([{ assetId: "skin", layerId: "outer" }])])).toEqual([]);
+  });
+
+  it("accepts several assets in the same layer and different assets in different layers", () => {
+    const assets = [
+      { assetId: "one", layerId: "outer" },
+      { assetId: "two", layerId: "outer" },
+      { assetId: "three", layerId: "inner" },
+      { assetId: "four" },
+    ];
+    expect(issuesOf([withLayers(assets)])).toEqual([]);
+  });
+
+  it("rejects an asset whose layer does not exist in the scene", () => {
+    expect(issuesOf([withLayers([{ assetId: "skin", layerId: "missing" }])])).toEqual([
+      { code: "unknown_asset_layer", nodeId: "a", assetId: "skin", layerId: "missing" },
+    ]);
+    expect(() => createSceneRegistry([withLayers([{ assetId: "skin", layerId: "missing" }])], graph))
+      .toThrow(SceneRegistryValidationError);
+  });
+
+  it("rejects the same asset twice, with or without layers, even in different layers", () => {
+    for (const assets of [
+      [{ assetId: "x" }, { assetId: "x" }],
+      [{ assetId: "x", layerId: "outer" }, { assetId: "x", layerId: "outer" }],
+      [{ assetId: "x", layerId: "outer" }, { assetId: "x", layerId: "inner" }],
+      [{ assetId: "x" }, { assetId: "x", layerId: "inner" }],
+    ]) {
+      expect(issuesOf([withLayers(assets)])).toEqual([
+        { code: "duplicate_asset", nodeId: "a", assetId: "x" },
+      ]);
+    }
+  });
+
+  it("reports duplicate assets before unknown asset layers, in scene order", () => {
+    const assets = [
+      { assetId: "x", layerId: "missing" },
+      { assetId: "x", layerId: "outer" },
+    ];
+    expect(issuesOf([withLayers(assets)])).toEqual([
+      { code: "duplicate_asset", nodeId: "a", assetId: "x" },
+      { code: "unknown_asset_layer", nodeId: "a", assetId: "x", layerId: "missing" },
+    ]);
+  });
+
+  it("keeps AssetReference as an opaque identity and the layer only in the scene entry", () => {
+    expectTypeOf<keyof AssetReference>().toEqualTypeOf<"assetId">();
+    expectTypeOf<keyof SceneAsset>().toEqualTypeOf<"assetId" | "layerId">();
+    expectTypeOf<SceneAsset>().toMatchTypeOf<AssetReference>();
+  });
+});
+
 describe("SceneRegistry immutability", () => {
   it("is not affected by later changes to the caller's assets", () => {
     const input = fullScene();
@@ -219,6 +288,32 @@ describe("SceneRegistry immutability", () => {
 
     expect(registry.scenes).toHaveLength(1);
     expect(registry.getScene("b")).toBeUndefined();
+  });
+
+  it("freezes each asset entry, including its layer, and keeps the scene identity", () => {
+    const input = scene({
+      nodeId: "a",
+      assets: [{ assetId: "skin", layerId: "outer" }, { assetId: "base" }],
+      layers: [{ id: "outer", label: "Externa" }],
+    });
+    const registry = createSceneRegistry([input], graph);
+    const returned = registry.getScene("a")!;
+
+    expect(Object.isFrozen(returned)).toBe(true);
+    expect(Object.isFrozen(returned.assets)).toBe(true);
+    expect(Object.isFrozen(returned.layers)).toBe(true);
+    for (const entry of returned.assets) {
+      expect(Object.isFrozen(entry)).toBe(true);
+    }
+    expect(() => {
+      (returned.assets[0] as { layerId?: string }).layerId = "other";
+    }).toThrow(TypeError);
+    expect(returned.assets).toEqual([{ assetId: "skin", layerId: "outer" }, { assetId: "base" }]);
+    expect("layerId" in (returned.assets[1] ?? {})).toBe(false);
+    expect(registry.getScene("a")).toBe(returned);
+
+    (input.assets as { assetId: string; layerId?: string }[])[0]!.layerId = "changed";
+    expect(registry.getScene("a")?.assets[0]).toEqual({ assetId: "skin", layerId: "outer" });
   });
 
   it("does not let consumers change the scenes it returns", () => {

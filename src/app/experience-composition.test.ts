@@ -86,6 +86,9 @@ describe("createApplicationExperience", () => {
     const scene = scenes.getScene(INITIAL_NODE_ID);
 
     expect(scene?.nodeId).toBe("human");
+    // Bootstrap técnico: sem assets nem layers.
+    expect(scene?.assets).toEqual([]);
+    expect(scene?.layers).toEqual([]);
     expect(scenes.getScene(INITIAL_NODE_ID)).toBe(scene);
     expect(Object.isFrozen(scene)).toBe(true);
     expect(scenes.scenes.filter((candidate) => candidate.nodeId === "human")).toEqual([scene]);

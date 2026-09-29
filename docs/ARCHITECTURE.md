@@ -338,8 +338,6 @@ interface BiologicalNode {
 
   scale?: Scale
 
-  model?: AssetReference
-
   educationalContent?: EducationalContent
 
   relations: BiologicalRelation[]
@@ -348,9 +346,11 @@ interface BiologicalNode {
 
 O nó representa identidade, classificação e relações.
 
+O nó não referencia representação visual: o domínio científico não conhece modelos, assets nem arquivos. Uma mesma estrutura pode ter várias representações conforme o contexto da experiência; a composição visual pertence à SceneDefinition (§19).
+
 Não possui texto científico próprio: todo texto científico pertence a `EducationalContent` (§22), que exige referências. Assim existe uma única fonte de verdade rastreável.
 
-`id` é a identidade científica estável da estrutura, em slug inglês (`nervous-system`, `brain`), usada em URLs, no grafo e em futuras referências de cena e assets.
+`id` é a identidade científica estável da estrutura, em slug inglês (`nervous-system`, `brain`), usada em URLs, no grafo e para identificar a cena de uma estrutura. Não é identidade de asset: `brain` não precisa corresponder a um arquivo `brain.glb` nem a uma layer `brain`.
 
 `name` e o conteúdo textual representam atualmente um único idioma (português). Internacionalização deverá ser tratada antes de oferecer múltiplos idiomas.
 
@@ -1234,8 +1234,8 @@ O progresso de transição pertence ao rendering: fade, progresso de explode, pr
 
 - **SceneRegistry (resolvida).** `createApplicationExperience` devolve a composição `{ runtime, scenes }`, e a aplicação lê as cenas com `useExperienceScenes()` (§17.2). É a mesma instância usada pelo Engine, já somente leitura (congelada, sem métodos de mutação), sem registry global, sem cópia e sem nova interface. O rendering continua sem acesso a ela, e o SceneManager não consulta o BiologicalGraph. A derivação da cena ativa ainda não foi feita.
 - **Gap A — Asset Registry.** Ainda não existe a resolução `assetId → recurso visual carregável`.
-- **Gap B — layer → conteúdo visual.** `VisualLayer` não descreve qual asset ou parte visual pertence à layer.
-- **Gap C — autoridade duplicada.** `BiologicalNode.model` e `SceneDefinition.assets` podem representar referências visuais concorrentes. Precisa ser resolvido antes do primeiro loader científico real.
+- **Gap B — layer → conteúdo visual (resolvida).** Cada entrada de `SceneDefinition.assets` declara opcionalmente a VisualLayer da cena a que pertence (§19); o SceneRegistry valida que a layer existe.
+- **Gap C — autoridade duplicada (resolvida).** `BiologicalNode.model` foi removido; a SceneDefinition é a única autoridade da composição visual.
 
 ### Status da decisão
 
@@ -1253,6 +1253,7 @@ O progresso de transição pertence ao rendering: fade, progresso de explode, pr
 - O rendering nunca depende de `src/app`.
 - O SceneManager não será dono da navegação nem do grafo científico.
 - A aplicação lê o SceneRegistry pela composição da aplicação (`useExperienceScenes`), na mesma instância usada pelo Engine; o `ExperienceRuntime` não expõe cenas.
+- A SceneDefinition é a autoridade da composição visual da cena e do pertencimento de assets a layers; o BiologicalNode não referencia representação visual.
 
 **Em aberto**
 
@@ -1261,8 +1262,6 @@ O progresso de transição pertence ao rendering: fade, progresso de explode, pr
 - autoridade sobre a câmera no Guided × Explore;
 - semântica do scroll;
 - contrato do Asset Registry;
-- mapeamento layer → asset;
-- autoridade entre `BiologicalNode.model` e `SceneDefinition.assets`;
 - mapeamento objeto interativo → BiologicalNode.
 
 ---
@@ -1299,10 +1298,14 @@ O primeiro SceneManager (`src/rendering/scenes/scene-manager.tsx`) é apenas est
 ```ts
 type Vec3 = readonly [number, number, number]
 
+interface SceneAsset extends AssetReference {
+  layerId?: string // VisualLayer desta cena; ausente = conteúdo base
+}
+
 interface SceneDefinition {
   nodeId: string
 
-  assets: AssetReference[]
+  assets: SceneAsset[]
 
   camera: {
     position: Vec3 // Scene Units (§11.2)
@@ -1326,6 +1329,16 @@ interface SceneDefinition {
 Assim, comportamento e conteúdo ficam desacoplados.
 
 `BiologicalNode` descreve o que a estrutura é; `SceneDefinition` descreve como ela participa da experiência; a Asset Layer resolve os recursos; a Rendering Layer os renderiza. A definição é declarativa e serializável: sem objetos de renderização, funções ou parâmetros de animação.
+
+`assets` é a composição visual da cena: os assets que dela participam e a layer de cada um. Não é lista de preload, cache nem catálogo.
+
+- `AssetReference` (`{ assetId }`) é só a identidade lógica e opaca de um asset: sem layer, URL, caminho, formato ou metadados de carregamento. `assetId` não é o id de um BiologicalNode nem de uma layer.
+- `SceneAsset` é a entrada do asset **nesta cena**: a identidade mais, opcionalmente, o `layerId` de uma VisualLayer da cena. O pertencimento a uma layer é propriedade da composição da cena, não do asset.
+- Cada asset pertence a no máximo uma layer da cena. Sem `layerId`, o asset é conteúdo base da cena, fora das layers controláveis; isso não significa layer invisível, padrão, carregamento nem erro.
+- `VisualLayer` é um agrupamento lógico de visibilidade dentro da cena; o LayerController mantém o estado de runtime dessas layers e desconhece assets.
+- O SceneRegistry garante que cada `assetId` aparece uma única vez por cena (duas entradas iguais são inválidas mesmo em layers diferentes) e que todo `layerId` declarado existe em `layers`; os problemas são reportados, na ordem da cena, junto com os demais pelo `SceneRegistryValidationError`.
+
+Autoridades: identidade científica → BiologicalNode / BiologicalGraph; composição da cena e pertencimento a layers → SceneDefinition; estado de runtime das layers → LayerController. Ainda futuros: catálogo de assets (resolução de `assetId`), loader, cache, LOD, preload e mapeamento de objetos para BiologicalNode.
 
 Há no máximo uma cena por nó, e toda cena aponta para um nó existente. Um nó pode existir sem cena: o grafo pode conter conhecimento que ainda não possui experiência visual.
 
@@ -1366,6 +1379,8 @@ Ainda não fazem parte do contrato, até existirem assets e decisões visuais qu
     └── proteins
 ```
 
+A árvore acima ilustra apenas a organização de arquivos. Ela não define identidade: um `assetId` é uma identidade visual lógica, independente do id de um BiologicalNode e de uma layer, e uma mesma estrutura pode ter várias representações. A organização definitiva dos arquivos e o catálogo de assets ainda não foram definidos.
+
 Formatos preferenciais:
 
 ```text
@@ -1391,19 +1406,18 @@ brain.glb
 
 não deverá conter toda a lógica referente ao cérebro.
 
-O relacionamento deverá ocorrer através de metadados.
+O relacionamento ocorre pela composição da cena, não pelo nó nem pelo arquivo:
 
 ```text
-brain.glb
-    ↓
-Asset ID
-    ↓
-BiologicalNode
-    ↓
-Scientific Content
+BiologicalNode ◄── SceneDefinition (nodeId)
+                        │ assets: { assetId, layerId? }
+                        ▼
+                   Asset ID (identidade lógica)
+                        ▼
+                   catálogo de assets (futuro) → arquivo (ex.: brain.glb)
 ```
 
-Essa separação permite trocar o modelo 3D sem alterar o conteúdo científico.
+O BiologicalNode não conhece seus assets, e o asset não conhece o BiologicalNode. Essa separação permite trocar o modelo 3D sem alterar o conteúdo científico.
 
 ---
 

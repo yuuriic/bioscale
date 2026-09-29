@@ -237,10 +237,15 @@ describe("provenance", () => {
     "domain",
     "type",
     "scale",
-    "model",
     "relations",
     "educationalContent",
   ]);
+
+  it("declares no visual representation on any node", () => {
+    for (const node of mvpBiologicalNodes) {
+      expect("model" in node, node.id).toBe(false);
+    }
+  });
 
   it("keeps all scientific text inside referenced educational content", () => {
     for (const node of mvpBiologicalNodes) {

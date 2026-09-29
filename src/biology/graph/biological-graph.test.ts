@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import type { BiologicalNode } from "./biological-node";
 import type { EducationalContent } from "./educational-content";
 import { isScaleRange, type Scale } from "./scale";
@@ -18,6 +18,12 @@ function node(overrides: Partial<BiologicalNode> & Pick<BiologicalNode, "id">): 
     ...overrides,
   };
 }
+
+describe("BiologicalNode contract", () => {
+  it("does not reference a visual representation", () => {
+    expectTypeOf<BiologicalNode>().not.toHaveProperty("model");
+  });
+});
 
 describe("validateBiologicalNodes", () => {
   it("accepts a consistent node set", () => {

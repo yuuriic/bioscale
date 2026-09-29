@@ -28,6 +28,14 @@ describe("domain boundaries", () => {
     expect(files).toContain("content/nodes/mvp-nodes.ts");
   });
 
+  it("keeps the scientific domain free of visual asset references", () => {
+    for (const file of files.filter((f) => f.startsWith("biology/") || f.startsWith("content/"))) {
+      const source = readFileSync(`${SRC}${file}`, "utf8");
+      const specifiers = [...source.matchAll(IMPORT_SPECIFIER)].map((m) => m[1] ?? m[2]);
+      expect(specifiers.filter((s) => s?.includes("asset")), file).toEqual([]);
+    }
+  });
+
   it("does not import UI, rendering, animation or state frameworks", () => {
     for (const file of files) {
       const source = readFileSync(`${SRC}${file}`, "utf8");
