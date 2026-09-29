@@ -46,7 +46,21 @@ const layersGroup = (...names) => ({
   message: "Viola a regra de dependência entre camadas (ARCHITECTURE.md §35).",
 });
 
-const UPPER_LAYERS = ["app", "components", "experience", "store", "hooks"];
+const UPPER_LAYERS = ["app", "components", "experience", "rendering", "store", "hooks"];
+
+// Rendering → Experience, nunca o contrário: a experiência não conhece
+// renderer nem bibliotecas de renderização.
+const renderingLibrariesGroup = {
+  group: ["three", "three/*", "@react-three/*"],
+  message: "O Experience Engine não pode depender de bibliotecas de renderização.",
+};
+
+// O Experience Engine é independente de framework; a composição React vive
+// em `app` (ARCHITECTURE.md §17.2).
+const uiFrameworksGroup = {
+  group: ["react", "react/*", "react-dom", "react-dom/*", "next", "next/*"],
+  message: "O Experience Engine não pode depender de React ou Next.js.",
+};
 
 // Módulos da experiência em TypeScript puro: estado e contratos declarativos
 // que dependem do grafo por injeção, nunca do dataset concreto.
@@ -165,7 +179,19 @@ export default defineConfig([
   {
     files: ["src/experience/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-imports": restrict(layersGroup("app", "components")),
+      "no-restricted-imports": restrict(
+        renderingLibrariesGroup,
+        uiFrameworksGroup,
+        layersGroup("app", "components", "rendering"),
+      ),
+    },
+  },
+  // O rendering consome a experiência, mas não obtém o runtime da composição
+  // da aplicação: app → rendering, nunca rendering → app.
+  {
+    files: ["src/rendering/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": restrict(layersGroup("app")),
     },
   },
   // Testes de integração podem importar content.
@@ -174,7 +200,7 @@ export default defineConfig([
     rules: {
       "no-restricted-imports": restrict(
         frameworkGroup,
-        layersGroup("app", "components", "store", "hooks", "assets"),
+        layersGroup("app", "components", "rendering", "store", "hooks", "assets"),
       ),
     },
   },
@@ -184,7 +210,7 @@ export default defineConfig([
     rules: {
       "no-restricted-imports": restrict(
         frameworkGroup,
-        layersGroup("app", "components", "store", "hooks", "assets", "content"),
+        layersGroup("app", "components", "rendering", "store", "hooks", "assets", "content"),
       ),
     },
   },

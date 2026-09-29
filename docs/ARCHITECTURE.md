@@ -703,6 +703,40 @@ createExperience({ graph, scenes, initialNodeId })
 
 ---
 
+## 11.5 ExperienceSnapshot
+
+Fronteira de leitura entre o Experience Engine e seus consumidores futuros (rendering, fallback DOM, ferramentas de teste/debug):
+
+```text
+Experience Controllers
+        ↓
+getExperienceSnapshot(runtime)
+        ↓
+ExperienceSnapshot
+        ↓
+consumidores futuros (rendering, aplicação)
+```
+
+```ts
+interface ExperienceSnapshot {
+  navigation: NavigationState
+  selection: SelectionState
+  camera: CameraState
+  layers: LayerControllerState
+}
+```
+
+- É uma fotografia read-only do estado lógico em um instante. Não contém cenas, grafo, assets nem conceitos de rendering, e não conhece renderer ou Three.js.
+- É calculada sob demanda e nunca armazenada: não há `runtime.snapshot` nem `getState` no ExperienceController.
+- Não é reativa: não há subscription, eventos nem store. A ponte reativa com a interface será definida depois.
+- Cada chamada cria um novo objeto agregado, congelado, mesmo sem mudanças. Os estados especializados são compartilhados por referência, porque os controllers já os expõem como snapshots imutáveis.
+- Por isso, fotografias antigas continuam válidas depois de qualquer mudança posterior.
+- A função recebe apenas os quatro controllers de estado do runtime, não o ExperienceController.
+
+Nenhum consumidor existe ainda: a integração com rendering não foi implementada.
+
+---
+
 # 12. Interaction Model
 
 Existirão dois modos principais.
@@ -959,6 +993,47 @@ O BioScale deverá utilizar preferencialmente um Canvas 3D persistente.
 ```
 
 Mudanças entre estruturas não deverão recriar desnecessariamente o contexto WebGL.
+
+## 17.1 Rendering Foundation
+
+A camada de rendering (`src/rendering`) é separada do Experience Engine:
+
+```text
+rendering  → experience     permitido
+experience -X→ rendering    proibido (ESLint e testes de fronteira)
+```
+
+- `ExperienceCanvas` é o Canvas React Three Fiber persistente. Existe uma única instância, montada no layout raiz da aplicação, que não é remontado entre páginas. Cenas futuras serão renderizadas dentro dele; nenhum BiologicalNode ou SceneDefinition cria Canvas próprio.
+- `ExperienceCanvas` é o único Client Component da camada; o layout e as páginas continuam Server Components. O Canvas é pré-renderizado no servidor sem carregamento dinâmico: o contexto WebGL é criado apenas no navegador.
+- `RenderingProbe` é um objeto técnico temporário (um cubo com iluminação mínima) que comprova o pipeline Next → React → R3F → Three → WebGL. Não é científico e será removido quando existirem cenas reais.
+- A câmera do Canvas é apenas técnica, para tornar o probe visível. Ainda não é controlada pelo CameraController.
+- O ExperienceSnapshot (§11.5) ainda não está conectado ao rendering: não há sincronização reativa, store ou subscription. O único Context existente transporta o runtime (§17.2).
+
+## 17.2 Client Experience Composition
+
+O `ExperienceRuntime` pertence à composição React da aplicação (`src/app`), não ao Experience Engine nem ao rendering:
+
+```text
+layout.tsx (Server Component)
+  └── ExperienceRuntimeProvider (Client Component)
+        ├── ExperienceCanvas
+        └── interface DOM
+```
+
+```text
+app        → experience, rendering
+rendering  → experience   (futuro)
+experience -X→ app, rendering, React
+rendering  -X→ app
+```
+
+- O Experience Engine continua independente de framework. `createApplicationExperience` (em `src/app/experience-config.ts`) reutiliza o dataset científico e `createExperience`.
+- O runtime não é singleton de módulo. O `ExperienceRuntimeProvider` cria uma instância por montagem, com inicialização preguiçosa de `useState`, e a mantém estável entre renders. Em Strict Mode o inicializador pode rodar mais de uma vez em desenvolvimento; como a criação é síncrona e sem efeitos externos, a instância descartada não deixa rastro. Na renderização no servidor, cada requisição cria e descarta a sua própria instância.
+- O Context é injeção de dependência, não store: transporta apenas a referência ao runtime, nunca um snapshot. `useExperienceRuntime()` apenas acessa o runtime e lança erro fora do Provider.
+- O `ExperienceCanvas` é descendente do Provider, mas ainda não o consome.
+- A SceneDefinition inicial (`human`) é um bootstrap técnico temporário: sem assets, layers ou capabilities, e não é uma cena científica.
+- A câmera lógica dessa cena e a câmera técnica do Canvas R3F continuam independentes.
+- Não existe snapshot reativo: nada sincroniza o Engine com React ou com o rendering.
 
 ---
 
@@ -1571,6 +1646,16 @@ Rendering
  ↓
 Assets
 ```
+
+e:
+
+```text
+Rendering
+ ↓
+Experience Engine
+```
+
+O Experience Engine não depende do rendering (§17.1).
 
 O domínio científico não deverá depender de:
 

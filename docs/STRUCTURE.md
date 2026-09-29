@@ -6,10 +6,10 @@ as seções 5, 34 e 35.
 
 | Diretório | Responsabilidade |
 | --- | --- |
-| `src/app` | Rotas, layout e composição da aplicação Next.js. |
+| `src/app` | Rotas, layout e composição da aplicação Next.js, incluindo o `ExperienceRuntimeProvider`. |
 | `src/components/ui` | Componentes de apresentação e controles sem conhecimento de renderização. |
 | `src/components/experience` | Integração da interface React com a experiência. |
-| `src/experience/engine` | Composição (`createExperience`) e coordenação (`ExperienceController`) dos controladores da experiência. |
+| `src/experience/engine` | Composição (`createExperience`), coordenação (`ExperienceController`) e leitura (`getExperienceSnapshot`) da experiência. |
 | `src/experience/camera` | Estado lógico da câmera (`CameraController`), centralizado nesta camada. |
 | `src/experience/navigation` | Navegação, histórico, caminhos e integração de deep links. |
 | `src/experience/selection` | Estado lógico da seleção (`SelectionController`). |
@@ -21,6 +21,8 @@ as seções 5, 34 e 35.
 | `src/biology/anatomy`, `histology`, `cellular`, `molecular` | Regras específicas dos quatro domínios, quando necessárias. |
 | `src/assets/registry` | Metadados que resolverão identificadores de assets em recursos visuais. |
 | `src/assets/loaders` | Carregamento futuro dos recursos visuais. |
+| `src/rendering/canvas` | Canvas React Three Fiber persistente (`ExperienceCanvas`). |
+| `src/rendering/debug` | Objetos técnicos temporários de validação (`RenderingProbe`). |
 | `src/content/nodes` | Instâncias de `BiologicalNode` (dataset), organizadas por domínio, e a composição do MVP. |
 | `src/content/references` | Instâncias de `ScientificReference` usadas pelo dataset. |
 | `src/store` | Estado da aplicação, separado do conhecimento científico. |
@@ -46,7 +48,8 @@ Os controladores implementados são o `NavigationController`
 (`src/experience/engine`).
 As cenas existem apenas como contrato declarativo (`src/experience/scenes`),
 sem cenas concretas do MVP. Não foram implementados os demais controladores,
-SceneManager, estado global, Three.js, animações ou modelos. As fixtures dos testes de `biology/graph` são
+SceneManager, estado global, cenas 3D, animações ou modelos; o rendering contém
+apenas o Canvas persistente e um probe técnico. As fixtures dos testes de `biology/graph` são
 estruturais e não constituem conteúdo educacional.
 
 ## Dataset científico inicial
@@ -119,6 +122,12 @@ constrói os quatro controllers já coerentes com a cena inicial, junto com o
 `ExperienceController` que os coordena. É o único arquivo do engine que
 depende do grafo.
 
+`experience-snapshot.ts` define o `ExperienceSnapshot` e `getExperienceSnapshot`
+(ARCHITECTURE.md §11.5): uma fotografia read-only, calculada sob demanda, dos
+estados de navegação, seleção, câmera e layers, para consumidores futuros.
+Depende apenas dos tipos de estado dos controllers; ainda não há consumidor de
+rendering.
+
 ## LayerController
 
 `src/experience/layers` contém o `LayerControllerState` e o `LayerController`
@@ -128,9 +137,40 @@ depende do grafo.
 tipo `VisualLayer`; não conhece SceneRegistry, capabilities nem os demais
 controllers.
 
+## Rendering
+
+```text
+src/rendering/
+├── canvas/experience-canvas.tsx   Canvas R3F persistente, único Client Component
+├── debug/rendering-probe.tsx      cubo técnico temporário, sem conteúdo científico
+└── rendering-boundaries.test.ts   fronteiras estruturais da camada
+```
+
+`ExperienceCanvas` é montado uma única vez em `src/app/layout.tsx`
+(ARCHITECTURE.md §17.1). A câmera é técnica e o `ExperienceSnapshot` ainda não
+é consumido. As dependências de rendering são `three` e `@react-three/fiber`
+(`@types/three` em desenvolvimento, pois `three` não publica tipos próprios).
+
+## Composição da aplicação
+
+```text
+src/app/
+├── experience-config.ts              bootstrap técnico: cena mínima de `human` e createApplicationExperience
+├── experience-runtime-provider.tsx   Client Component: Context com o runtime e useExperienceRuntime
+└── experience-composition.test.ts    Provider, hook e fronteiras da composição
+```
+
+`layout.tsx` continua Server Component e monta o `ExperienceRuntimeProvider`
+envolvendo o `ExperienceCanvas` e a interface (ARCHITECTURE.md §17.2). O Canvas
+ainda não consome o runtime, e nenhum snapshot é sincronizado com React.
+
 ## Dependências e verificação
 
-O fluxo previsto é `UI → Experience Engine → Domain` e `Rendering → Assets`.
+O fluxo previsto é `UI → Experience Engine → Domain`, `Rendering → Experience
+Engine` e `Rendering → Assets`. `src/experience` não pode importar
+`src/rendering`, `src/app`, `three`, `@react-three/*`, React nem Next.js;
+`src/rendering` não pode importar `src/app` e fica fora do
+`tsconfig.domain.json`, pois depende de DOM/WebGL.
 O ESLint existente restringe imports entre camadas, frameworks no domínio,
 referências diretas a DOM/WebGL e ciclos. `experience/navigation`,
 `experience/scenes`, `experience/camera`, `experience/selection`,

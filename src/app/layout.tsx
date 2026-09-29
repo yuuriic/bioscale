@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { ExperienceCanvas } from "@/rendering/canvas/experience-canvas";
+import { ExperienceRuntimeProvider } from "./experience-runtime-provider";
 
 export const metadata: Metadata = {
   title: "BioScale",
@@ -9,7 +11,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { readonly children: ReactNode }) {
   return (
     <html lang="pt-BR">
-      <body>{children}</body>
+      <body style={{ margin: 0 }}>
+        <ExperienceRuntimeProvider>
+          {/* Canvas único e persistente: o layout raiz não é remontado entre páginas. */}
+          <ExperienceCanvas />
+          <div style={{ position: "relative" }}>{children}</div>
+        </ExperienceRuntimeProvider>
+      </body>
     </html>
   );
 }

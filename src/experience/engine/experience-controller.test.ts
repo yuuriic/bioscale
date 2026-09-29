@@ -617,7 +617,7 @@ describe("engine module boundaries", () => {
   const sources = readdirSync(directory)
     .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
     .map((file) => ({ file, source: readFileSync(`${directory}${file}`, "utf8") }))
-    // create-experience.ts é o composition root, com fronteiras próprias.
+    // create-experience.ts e experience-snapshot.ts têm fronteiras próprias.
     .filter(({ file }) => file === "experience-controller.ts");
   const specifiers = (source: string) =>
     [...source.matchAll(/from\s*["']([^"']+)["']/g)].flatMap((match) => match[1] ?? []);
@@ -628,6 +628,7 @@ describe("engine module boundaries", () => {
     expect(readdirSync(directory).filter((file) => !file.endsWith(".test.ts")).sort()).toEqual([
       "create-experience.ts",
       "experience-controller.ts",
+      "experience-snapshot.ts",
     ]);
   });
 
