@@ -138,9 +138,9 @@ describe("client composition boundaries", () => {
     expect(read(file)).not.toMatch(/useSyncExternalStore|useReducer|getExperienceSnapshot/);
   });
 
-  it("mounts the ExperienceCanvas inside the Provider in the root layout", () => {
+  it("mounts the rendering bridge and the DOM content inside the Provider in the root layout", () => {
     expect(read("app/layout.tsx")).toMatch(
-      /<ExperienceRuntimeProvider>[\s\S]*<ExperienceCanvas \/>[\s\S]*<\/ExperienceRuntimeProvider>/,
+      /<ExperienceRuntimeProvider>[\s\S]*<ExperienceRenderingBridge \/>[\s\S]*\{children\}[\s\S]*<\/ExperienceRuntimeProvider>/,
     );
   });
 

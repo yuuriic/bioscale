@@ -49,11 +49,45 @@ describe("rendering layer boundaries", () => {
     expect(canvasCreators).toEqual(["rendering/canvas/experience-canvas.tsx"]);
   });
 
-  it("mounts the ExperienceCanvas once, in the root layout only", () => {
-    const mounts = sourceFiles("")
+  it("mounts the ExperienceCanvas once, through the application bridge mounted in the layout", () => {
+    const mountsOf = (component: string) =>
+      sourceFiles("")
+        .filter((file) => !file.endsWith(".test.ts"))
+        .flatMap((file) =>
+          [...read(file).matchAll(new RegExp(`<${component}\\b`, "g"))].map(() => file),
+        );
+    expect(mountsOf("ExperienceCanvas")).toEqual(["app/experience-rendering-bridge.tsx"]);
+    expect(mountsOf("ExperienceRenderingBridge")).toEqual(["app/layout.tsx"]);
+  });
+
+  it("never imports the application layer", () => {
+    for (const file of sourceFiles("rendering")) {
+      expect(importsOf(file).filter((s) => s.startsWith("@/app")), file).toEqual([]);
+      expect(read(file), file).not.toMatch(/\buse(ExperienceSnapshot|ExperienceRuntime)\b/);
+    }
+  });
+
+  it("depends on the Experience Engine only through the layer state type", () => {
+    const engineImports = sourceFiles("rendering")
       .filter((file) => !file.endsWith(".test.ts"))
-      .flatMap((file) => [...read(file).matchAll(/<ExperienceCanvas\b/g)].map(() => file));
-    expect(mounts).toEqual(["app/layout.tsx"]);
+      .flatMap((file) => importsOf(file).filter((s) => s.startsWith("@/experience")));
+    expect([...new Set(engineImports)]).toEqual(["@/experience/layers/layer-state"]);
+    for (const file of sourceFiles("rendering").filter((f) => !f.endsWith(".test.ts"))) {
+      expect(read(file), file).not.toMatch(/^import\s+(?!type\b).*["']@\/experience/m);
+    }
+  });
+
+  it("receives only layers and keeps the camera technical, without navigation or selection", () => {
+    const canvas = read("rendering/canvas/experience-canvas.tsx");
+    expect(canvas).toMatch(
+      /export interface ExperienceCanvasProps \{[^}]*readonly layers: LayerControllerState;\s*\}/,
+    );
+    expect(canvas).toMatch(/camera=\{\{ position: \[2\.5, 2, 3\.5\], fov: 50 \}\}/);
+    for (const file of sourceFiles("rendering").filter((f) => !f.endsWith(".test.ts"))) {
+      expect(read(file), file).not.toMatch(
+        /\b(useFrame|navigation|selection|currentNode|selectedNodeId|CameraState|lookAt|ExperienceSnapshot|ExperienceRuntime)\b/,
+      );
+    }
   });
 
   it("keeps the rendering probe free of the engine, animation and asset loading", () => {

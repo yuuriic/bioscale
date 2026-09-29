@@ -1031,11 +1031,11 @@ rendering  → experience     permitido
 experience -X→ rendering    proibido (ESLint e testes de fronteira)
 ```
 
-- `ExperienceCanvas` é o Canvas React Three Fiber persistente. Existe uma única instância, montada no layout raiz da aplicação, que não é remontado entre páginas. Cenas futuras serão renderizadas dentro dele; nenhum BiologicalNode ou SceneDefinition cria Canvas próprio.
+- `ExperienceCanvas` é o Canvas React Three Fiber persistente. Existe uma única instância, montada pela ponte da aplicação (§17.4) dentro do layout raiz, que não é remontado entre páginas. Cenas futuras serão renderizadas dentro dele; nenhum BiologicalNode ou SceneDefinition cria Canvas próprio.
 - `ExperienceCanvas` é o único Client Component da camada; o layout e as páginas continuam Server Components. O Canvas é pré-renderizado no servidor sem carregamento dinâmico: o contexto WebGL é criado apenas no navegador.
 - `RenderingProbe` é um objeto técnico temporário (um cubo com iluminação mínima) que comprova o pipeline Next → React → R3F → Three → WebGL. Não é científico e será removido quando existirem cenas reais.
 - A câmera do Canvas é apenas técnica, para tornar o probe visível. Ainda não é controlada pelo CameraController.
-- O ExperienceSnapshot (§11.5) ainda não está conectado ao rendering: não há sincronização reativa, store ou subscription. O único Context existente transporta o runtime (§17.2).
+- O rendering não lê o ExperienceSnapshot nem o runtime: recebe da aplicação, por props, apenas o estado que interpreta (§17.4). O único Context existente transporta o runtime (§17.2).
 
 ## 17.2 Client Experience Composition
 
@@ -1061,7 +1061,7 @@ rendering  -X→ app
 - O `ExperienceCanvas` é descendente do Provider, mas ainda não o consome.
 - A SceneDefinition inicial (`human`) é um bootstrap técnico temporário: sem assets, layers ou capabilities, e não é uma cena científica.
 - A câmera lógica dessa cena e a câmera técnica do Canvas R3F continuam independentes.
-- A leitura reativa do snapshot é feita por `useExperienceSnapshot` (§17.3). Nada sincroniza o Engine com o rendering.
+- A leitura reativa do snapshot é feita por `useExperienceSnapshot` (§17.3). O rendering recebe da aplicação apenas o estado de layers (§17.4).
 
 ## 17.3 React Experience Snapshot Bridge
 
@@ -1081,7 +1081,28 @@ reader.getSnapshot ─────────┘   leitura estável
 - Não há store duplicada: o estado continua nos controllers, sem `useState` de snapshot, reducer ou efeito de sincronização. O Context continua transportando apenas o runtime, nunca o snapshot.
 - SSR e hidratação usam `getServerSnapshot`, que é o mesmo reader. O runtime do servidor e o do cliente são instâncias diferentes, cada uma criada pelo Provider na sua renderização. A coerência entre o markup do servidor e a primeira leitura do cliente vem da inicialização determinística do runtime, não da identidade entre objetos.
 - Não há selectors nesta etapa: o hook devolve o snapshot completo.
-- O Canvas ainda não consome o snapshot.
+- O Canvas não consome o hook: recebe da ponte da aplicação somente o que interpreta (§17.4).
+
+## 17.4 Application → Rendering Bridge
+
+O rendering não conhece a aplicação. A ponte fica em `src/app`, lê o snapshot e injeta no rendering apenas o estado que ele interpreta:
+
+```text
+ExperienceRuntime ──► useExperienceSnapshot() ──► ExperienceRenderingBridge (src/app)
+                                                        │  layers
+                                                        ▼
+                                                  ExperienceCanvas (src/rendering)
+                                                        └── LayerGroups
+```
+
+- `ExperienceRenderingBridge` é um Client Component da aplicação e o primeiro consumidor real de `useExperienceSnapshot`. O layout (Server Component) monta a ponte dentro do `ExperienceRuntimeProvider`, ao lado do conteúdo DOM.
+- O primeiro contrato conectado é o de layers: `ExperienceCanvas` recebe `layers: LayerControllerState`, o estado imutável do LayerController, sem cópia nem estado local. O rendering importa apenas esse tipo do Experience Engine (`rendering → experience`) e nunca importa `src/app`.
+- O Canvas não recebe o runtime, o snapshot completo nem controllers.
+- `LayerGroups` cria um grupo de cena vazio por VisualLayer, na ordem declarada. Uma layer é renderizada se estiver visível e, havendo isolamento, for a isolada; isolar uma layer oculta não a torna visível. A transparência lógica ainda não é interpretada, porque os grupos não têm materiais. Os grupos receberão o conteúdo dos assets de cada layer.
+- A cena técnica de `human` não tem layers, então nenhum grupo existe hoje; nenhuma layer científica foi inventada, e o `RenderingProbe` não mudou.
+- Câmera, navegação e seleção não atravessam a fronteira: a câmera do Canvas continua técnica, não há SceneManager, modelos nem highlight.
+- Não há store duplicada: as props vêm diretamente do snapshot React.
+- O bridge usa o snapshot completo e, portanto, renderiza de novo quando qualquer parte muda, mesmo passando apenas layers; a prop `layers` mantém a referência quando as layers não mudam. Isso é aceitável temporariamente. Estratégias para estado de alta frequência (como câmera) e leituras mais granulares serão definidas separadamente, guiadas por profiling e pelos requisitos do rendering.
 
 ---
 
