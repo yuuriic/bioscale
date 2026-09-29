@@ -1104,6 +1104,163 @@ ExperienceRuntime ──► useExperienceSnapshot() ──► ExperienceRenderin
 - Não há store duplicada: as props vêm diretamente do snapshot React.
 - O bridge usa o snapshot completo e, portanto, renderiza de novo quando qualquer parte muda, mesmo passando apenas layers; a prop `layers` mantém a referência quando as layers não mudam. Isso é aceitável temporariamente. Estratégias para estado de alta frequência (como câmera) e leituras mais granulares serão definidas separadamente, guiadas por profiling e pelos requisitos do rendering.
 
+## 17.5 Experience → Rendering State Ownership
+
+Decisão arquitetural sobre quem é dono de cada estado e como ele atravessa a fronteira entre o Experience Engine e o rendering. Registra ownership e direção de dependência; interfaces ainda não implementadas não são fixadas aqui.
+
+```text
+Experience Engine    estado lógico e semântico (fonte da verdade)
+Application / React  adaptação do estado declarativo entre os dois mundos
+Rendering            estado visual e transitório necessário para produzir frames
+```
+
+O Engine não é um armazenamento de estado de frame: não tem conceito de frame e não é atualizado a cada frame. O rendering não é fonte da verdade para estado biológico nem para navegação.
+
+### Estado lógico × estado renderizado
+
+- **Estado lógico** (Engine): nó atual e histórico, seleção, layers (visibilidade, transparência, isolamento), alvo lógico da câmera e base de `reset`, modo guided/explore. É semântico, reproduzível e muda em eventos discretos.
+- **Estado renderizado** (rendering): pose instantânea da câmera, progresso de transições, opacidade intermediária de fades, progresso de explode, cena que está saindo, estado de carregamento de assets, hover, objetos Three e estado de GPU.
+
+Valores intermediários não são adicionados ao Engine apenas para animar frames.
+
+### Classificação
+
+- **Layers — DECLARATIVE.** Fonte da verdade: LayerController. Fluxo atual: `LayerController → ExperienceSnapshot → useExperienceSnapshot → ExperienceRenderingBridge → ExperienceCanvas → LayerGroups` (§17.4). Visibilidade e isolamento são declarativos; valores intermediários de fades futuros pertencem ao rendering.
+- **Navegação / cena — DECLARATIVE.** O NavigationController continua fonte da verdade de `currentNode`. A identidade da representação visual será derivada de `currentNode` + SceneRegistry e entregue declarativamente ao rendering. Carregamento, montagem, desmontagem e progresso de transição pertencem ao rendering. O SceneManager não será o NavigationController.
+- **Seleção — DECLARATIVE.** O SelectionController é a fonte da verdade da seleção semântica. A UI DOM e o rendering poderão reagir declarativamente a `selectedNodeId`; eventos 3D futuros poderão produzir comandos para o SelectionController. Hover não pertence ao Engine.
+- **Câmera — HYBRID.** O CameraController representa a **pose lógica alvo**, não a posição física da câmera em cada frame. O rendering é responsável pela interpolação, pela posição e orientação instantâneas, pelo progresso e pela aplicação na `PerspectiveCamera` do Three. O CameraController não é escrito a cada frame.
+
+### Câmera: fronteira de observação
+
+O rendering receberá uma interface estreita para observar mudanças do alvo lógico da câmera, sem receber o `ExperienceRuntime` completo e sem depender de `src/app`. A forma concreta dessa interface será definida no milestone do Camera Adapter.
+
+Já decidido sobre a câmera:
+
+- o CameraController não é atualizado por frame;
+- a câmera renderizada pode divergir temporariamente do alvo lógico;
+- a entrada em uma nova cena pode estabelecer um novo alvo lógico;
+- valores intermediários permanecem no rendering.
+
+Em aberto:
+
+- **Interação manual (órbita, zoom).** A pose exploratória do usuário é (A) estado semântico da experiência ou (B) estado visual transitório da sessão? A decisão afeta `reset`, `back`, histórico, deep links e URLs, Guided e Explore Mode, scroll e persistência ou reprodução da experiência.
+- **Autoridade no Guided × Explore.** Quem conduz a câmera em cada modo.
+- **Semântica do scroll.** Keyframes lógicos discretos, progresso visual contínuo ou estratégia híbrida.
+
+### SceneManager (futuro)
+
+Poderá:
+
+- receber a descrição da cena ativa;
+- montar e desmontar conteúdo visual no Canvas persistente, sem recriá-lo;
+- coordenar o ciclo de vida visual e o carregamento;
+- aplicar layers;
+- manter o estado transitório da cena que sai durante transições;
+- apresentar fallback para cena sem representação visual.
+
+Não deve:
+
+- controlar o NavigationController;
+- decidir regras biológicas ou possuir o BiologicalGraph;
+- ser banco de assets;
+- espelhar o ExperienceSnapshot ou virar store global;
+- controlar a semântica da câmera.
+
+### Estado de transição
+
+O progresso de transição pertence ao rendering: fade, progresso de explode, progresso da interpolação da câmera, cena que sai e opacidade intermediária.
+
+`LayerController.applyLayers` substitui a configuração imediatamente quando a cena muda. Uma transição futura poderá precisar congelar a representação visual da cena anterior e suas layers como estado transitório do rendering.
+
+### React, R3F e subscriptions
+
+- A reconciliação do React é apropriada para mudanças discretas e estruturais: identidade da cena, estrutura de layers, visibilidade e isolamento, seleção, UI DOM e ciclo de vida de assets. Não é usada como loop de animação; valores frame a frame pertencem ao rendering e ao R3F.
+- `runtime.subscribe` global é suficiente para a arquitetura atual. Não são introduzidos subscriptions por controller, selectors, `equalityFn`, subscriptions granulares, Zustand, Redux nem outro event bus; reavaliar só mediante necessidade concreta ou profiling.
+
+### SSR
+
+- Semanticamente relevantes para DOM e SSR: navegação, conteúdo, breadcrumbs e o estado inicial de controles e layers, quando aplicável.
+- Somente cliente e rendering: WebGL, objetos Three, estado de GPU, pose renderizada da câmera, progresso de transição, hover e estado de frame.
+- O alvo lógico da câmera permanece inicializado de forma determinística, mas não precisa produzir markup DOM.
+
+### Diagrama
+
+```text
+                     EXPERIENCE ENGINE
+                     lógico / semântico
+                            │
+           ┌────────────────┼────────────────┐
+           │                │                │
+      Navigation          Layers         Selection
+           │                │                │
+           └────────── estado declarativo ───┘
+                            │
+                            ▼
+                       APPLICATION
+                 adapters / bridges React
+                            │
+                            ▼
+                        RENDERING
+                 reconciliação estrutural
+                            │
+                            ▼
+                           R3F
+
+
+                     CameraController
+                   somente alvo lógico
+                            │
+                            ▼
+                  fronteira estreita de
+                observação (futura; interface
+                   concreta não escolhida)
+                            │
+                            ▼
+                      Camera Adapter
+                        rendering
+                            │
+                     refs / useFrame
+                            │
+                            ▼
+                       Three Camera
+                pose renderizada transitória
+```
+
+### Lacunas registradas
+
+- **SceneRegistry.** `createApplicationExperience` cria o SceneRegistry, mas ele não fica disponível para a aplicação depois da composição, o que bloqueia resolver `currentNode → SceneDefinition` fora da criação inicial. O próximo milestone deverá definir uma API somente leitura para a aplicação consultar as cenas, sem tornar o registry global, sem duplicá-lo, sem expor mutação, sem colocar conhecimento de cenas no rendering e sem que o SceneManager consulte o BiologicalGraph diretamente.
+- **Gap A — Asset Registry.** Ainda não existe a resolução `assetId → recurso visual carregável`.
+- **Gap B — layer → conteúdo visual.** `VisualLayer` não descreve qual asset ou parte visual pertence à layer.
+- **Gap C — autoridade duplicada.** `BiologicalNode.model` e `SceneDefinition.assets` podem representar referências visuais concorrentes. Precisa ser resolvido antes do primeiro loader científico real.
+
+### Status da decisão
+
+**Decidido**
+
+- O Engine é dono do estado lógico e semântico.
+- O rendering é dono do estado transitório de frame.
+- Layers: declarativo.
+- Navegação e identidade de cena: declarativo.
+- Seleção: declarativo.
+- Câmera: híbrido.
+- O CameraController representa o alvo lógico.
+- O Engine não é atualizado por frame.
+- O Canvas continua persistente.
+- O rendering nunca depende de `src/app`.
+- O SceneManager não será dono da navegação nem do grafo científico.
+
+**Em aberto**
+
+- interface exata do Camera Adapter;
+- semântica de consolidação da órbita manual;
+- autoridade sobre a câmera no Guided × Explore;
+- semântica do scroll;
+- exposição somente leitura do SceneRegistry;
+- contrato do Asset Registry;
+- mapeamento layer → asset;
+- autoridade entre `BiologicalNode.model` e `SceneDefinition.assets`;
+- mapeamento objeto interativo → BiologicalNode.
+
 ---
 
 # 18. Scene Manager
