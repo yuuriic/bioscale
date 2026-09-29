@@ -1,4 +1,5 @@
 import type { CameraController } from "@/experience/camera/camera-controller";
+import type { LayerController } from "@/experience/layers/layer-controller";
 import {
   breadcrumbAt,
   type NavigationController,
@@ -26,6 +27,7 @@ export interface ExperienceControllerDependencies {
   readonly navigation: NavigationController;
   readonly selection: SelectionController;
   readonly camera: CameraController;
+  readonly layers: LayerController;
   readonly scenes: SceneRegistry;
 }
 
@@ -40,31 +42,38 @@ export interface ExperienceControllerDependencies {
  * Mudanças são lógicas e imediatas: transições visuais ainda não existem.
  *
  * Toda mudança de cena resolve o destino e sua SceneDefinition antes de
- * alterar qualquer controller, e então navega, limpa a seleção e aplica o
- * preset de câmera da cena, que passa a ser a base de reset. Sem rollback,
- * pelas invariantes:
+ * alterar qualquer controller, e então navega, limpa a seleção, aplica o
+ * preset de câmera da cena (nova base de reset) e aplica suas layers, que
+ * recomeçam do estado inicial declarado. O estado anterior das layers de uma
+ * cena nunca é restaurado. Sem rollback, pelas invariantes:
  * - a navegação é a primeira mutação e falha antes de alterar estado;
  * - `clearSelection` não falha;
- * - `applyPreset` não falha para cenas de `createSceneRegistry`, que as
- *   valida com a mesma regra usada pelo CameraController. Outra
- *   implementação de SceneRegistry precisa preservar essa invariante.
+ * - `applyPreset` e `applyLayers` não falham para cenas de
+ *   `createSceneRegistry`, que valida a câmera com a mesma regra do
+ *   CameraController e rejeita IDs de layer repetidos. Outra implementação
+ *   de SceneRegistry precisa preservar essas invariantes.
+ *
+ * Não aplica política de capabilities às layers.
  */
 export class ExperienceController {
   readonly #navigation: NavigationController;
   readonly #selection: SelectionController;
   readonly #camera: CameraController;
+  readonly #layers: LayerController;
   readonly #scenes: SceneRegistry;
 
-  constructor({ navigation, selection, camera, scenes }: ExperienceControllerDependencies) {
+  constructor({ navigation, selection, camera, layers, scenes }: ExperienceControllerDependencies) {
     this.#navigation = navigation;
     this.#selection = selection;
     this.#camera = camera;
+    this.#layers = layers;
     this.#scenes = scenes;
   }
 
   /**
    * Entra na experiência visual do nó. Reentrar na cena atual é explícito:
-   * não adiciona etapa ao percurso, mas limpa a seleção e reaplica o preset.
+   * não adiciona etapa ao percurso, mas limpa a seleção e reaplica o preset
+   * de câmera e as layers, que voltam ao estado inicial.
    */
   enter(nodeId: string): void {
     const scene = this.#requireScene(nodeId);
@@ -107,9 +116,13 @@ export class ExperienceController {
     return scene;
   }
 
-  /** Estado visual após a navegação: sem seleção, câmera no preset da cena. */
+  /**
+   * Estado visual após a navegação: sem seleção, câmera no preset da cena e
+   * layers da cena em estado inicial.
+   */
   #enterScene(scene: SceneDefinition): void {
     this.#selection.clearSelection();
     this.#camera.applyPreset(scene.camera);
+    this.#layers.applyLayers(scene.layers);
   }
 }

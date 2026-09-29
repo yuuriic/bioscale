@@ -650,6 +650,7 @@ Camada mínima de orquestração. Cada peça mantém uma única responsabilidade
 NavigationController   percurso
 SelectionController    seleção
 CameraController       enquadramento
+LayerController        estado das camadas visuais
 SceneRegistry          definições de cena disponíveis
 ExperienceController   coordenação da entrada lógica em uma cena
 ```
@@ -662,6 +663,7 @@ enter(nodeId) | back() | returnToBreadcrumb(index)
   → navigate | back | returnToBreadcrumb
   → clearSelection
   → apply CameraPreset
+  → apply VisualLayers
 ```
 
 O destino é resolvido antes de qualquer mutação, a partir do estado público do NavigationController: o último item do histórico para `back`, a posição do breadcrumb para o retorno (a posição identifica a ocorrência, mesmo com nós repetidos). A validade do índice é a mesma regra da navegação, compartilhada por ela.
@@ -669,7 +671,7 @@ O destino é resolvido antes de qualquer mutação, a partir do estado público 
 Reentrada e ausência de mudança são intenções distintas:
 
 ```text
-enter(nó atual)                  reentrada explícita: limpa a seleção e reaplica a câmera
+enter(nó atual)                  reentrada explícita: limpa a seleção e reaplica câmera e layers
 back() sem histórico             nenhuma mudança
 returnToBreadcrumb(posição atual) nenhuma mudança
 ```
@@ -677,10 +679,27 @@ returnToBreadcrumb(posição atual) nenhuma mudança
 - Sem SceneDefinition para o destino, a operação falha (`SceneNotAvailableError`) antes de qualquer mutação. Isso não é o mesmo que um BiologicalNode inexistente: o ExperienceController não consulta o grafo e apenas informa que não há experiência visual disponível. Como os controllers seguem utilizáveis diretamente, o percurso pode conter nós sem cena; voltar para eles também falha sem mutação.
 - Um índice de breadcrumb inválido falha com o mesmo erro da navegação, sem mutação.
 - Toda mudança de cena efetiva limpa a seleção, e o preset da cena de destino passa a ser a base do reset da câmera.
-- A construção não altera os controllers recebidos. O estado inicial pertence à composição externa.
+- Toda mudança de cena efetiva aplica as layers declaradas da cena de destino em estado inicial. O estado anterior das layers de uma cena não é restaurado: `back`, o retorno por breadcrumb e a reentrada começam da definição declarativa. Operações sem efeito e falhas resolvidas antes da mudança preservam as layers.
+- A construção não altera os controllers recebidos. O ExperienceController coordena apenas mudanças depois que a experiência existe; o estado inicial vem da composição (abaixo).
 - O ExperienceController não possui estado nem histórico próprios: o NavigationController é a única fonte do percurso, e todos os controllers continuam utilizáveis diretamente, inclusive `back` e `returnToBreadcrumb` da navegação.
-- Não há rollback. A navegação é a primeira mutação e falha antes de alterar estado; `clearSelection` não falha; e `applyPreset` não falha para cenas de um SceneRegistry validado, que usa a mesma regra de câmera do CameraController. Outra implementação de SceneRegistry precisa preservar essa invariante.
+- Não há rollback. A navegação é a primeira mutação e falha antes de alterar estado; `clearSelection` não falha; e `applyPreset` e `applyLayers` não falham para cenas de um SceneRegistry validado, que usa a mesma regra de câmera do CameraController e rejeita IDs de layer repetidos. Outra implementação de SceneRegistry precisa preservar essas invariantes.
+- A coordenação não aplica política de capabilities às layers.
 - As mudanças são lógicas e imediatas. Transições visuais (preparar destino → transição → consolidar estado visual) continuam adiadas até existir renderização.
+
+A experiência inicial é criada por composição explícita, não por uma sequência de mutações:
+
+```text
+createExperience({ graph, scenes, initialNodeId })
+  → valida o nó no grafo        (UnknownBiologicalNodeError)
+  → resolve a SceneDefinition   (SceneNotAvailableError, sem fallback)
+  → NavigationController no nó inicial, sem histórico, modo guided
+  → SelectionController sem seleção
+  → CameraController(scene.camera)
+  → LayerController(scene.layers)
+  → ExperienceController com essas mesmas instâncias
+```
+
+`createExperience` não chama `enter` nem aplica presets ou layers depois da construção: cada controller já nasce no estado da cena inicial. O retorno é apenas o conjunto de referências aos controllers, não um estado agregado nem um store. O grafo e o registro devem descrever o mesmo conhecimento; isso continua sendo responsabilidade de quem os compõe.
 
 ---
 
@@ -777,6 +796,24 @@ RESET
 ```
 
 O LayerController será responsável por essas operações.
+
+`SceneDefinition.layers` declara quais camadas existem; o LayerController mantém o **estado lógico** dessas camadas durante a experiência. É independente de framework e não conhece renderer, meshes ou materiais; a Rendering Layer interpretará o estado.
+
+```ts
+interface LayerControllerState {
+  layers: { layerId: string; visible: boolean; transparent: boolean }[] // ordem declarada pela cena
+  isolatedLayerId?: string
+}
+```
+
+- Visibilidade e transparência são independentes: uma camada pode estar invisível e transparente, e o rendering decide como interpretar a combinação.
+- Transparência é uma intenção binária. O grau de opacidade é decisão de rendering/estilo, não do estado lógico.
+- Isolamento é uma intenção ortogonal: registra qual camada isolar sem alterar visibilidade ou transparência de nenhuma camada. Limpar o isolamento devolve exatamente os estados anteriores.
+- `reset` volta ao estado inicial da configuração atual: todas visíveis, nenhuma transparente, nenhuma isolada.
+- O LayerController não valida as capabilities da cena: se a cena permite isolar ou tornar transparente é política da coordenação da experiência.
+- Exploded view (§14) ainda não faz parte do LayerController.
+- O LayerController controla uma configuração por vez. `applyLayers(layers)` substitui completamente a configuração por uma nova, em estado inicial. O estado visual não é preservado entre configurações, mesmo para IDs iguais; reaplicar a mesma configuração também volta ao estado inicial. IDs repetidos são rejeitados sem alterar a configuração atual.
+- Mudanças de cena feitas pelo ExperienceController (§11.4) aplicam as layers da SceneDefinition de destino.
 
 ---
 

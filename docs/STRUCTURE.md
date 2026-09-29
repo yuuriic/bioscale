@@ -9,13 +9,13 @@ as seções 5, 34 e 35.
 | `src/app` | Rotas, layout e composição da aplicação Next.js. |
 | `src/components/ui` | Componentes de apresentação e controles sem conhecimento de renderização. |
 | `src/components/experience` | Integração da interface React com a experiência. |
-| `src/experience/engine` | Coordenação dos controladores da experiência (`ExperienceController`). |
+| `src/experience/engine` | Composição (`createExperience`) e coordenação (`ExperienceController`) dos controladores da experiência. |
 | `src/experience/camera` | Estado lógico da câmera (`CameraController`), centralizado nesta camada. |
 | `src/experience/navigation` | Navegação, histórico, caminhos e integração de deep links. |
 | `src/experience/selection` | Estado lógico da seleção (`SelectionController`). |
 | `src/experience/interaction` | Associação futura de interações a identificadores biológicos. |
 | `src/experience/transitions` | Coordenação futura das transições entre estruturas e escalas. |
-| `src/experience/layers` | Controle futuro das camadas visuais. |
+| `src/experience/layers` | Estado lógico das camadas visuais (`LayerController`). |
 | `src/experience/scenes` | `SceneDefinition` e `SceneRegistry`; coordenação futura da cena ativa. |
 | `src/biology/graph` | Contratos, validação estrutural e consulta do grafo científico. |
 | `src/biology/anatomy`, `histology`, `cellular`, `molecular` | Regras específicas dos quatro domínios, quando necessárias. |
@@ -40,9 +40,10 @@ e renderização pertencem a outras camadas. As relações do grafo são explíc
 consultar relações de entrada não cria relações inversas nem uma árvore rígida.
 
 Os controladores implementados são o `NavigationController`
-(`src/experience/navigation`), o `CameraController` (`src/experience/camera`) e o
-`SelectionController` (`src/experience/selection`), coordenados pelo
-`ExperienceController` (`src/experience/engine`).
+(`src/experience/navigation`), o `CameraController` (`src/experience/camera`), o
+`SelectionController` (`src/experience/selection`) e o `LayerController`
+(`src/experience/layers`), coordenados pelo `ExperienceController`
+(`src/experience/engine`).
 As cenas existem apenas como contrato declarativo (`src/experience/scenes`),
 sem cenas concretas do MVP. Não foram implementados os demais controladores,
 SceneManager, estado global, Three.js, animações ou modelos. As fixtures dos testes de `biology/graph` são
@@ -105,25 +106,42 @@ controllers são independentes e não se importam.
 ## ExperienceController
 
 `src/experience/engine` contém o `ExperienceController` (ARCHITECTURE.md §11.4),
-que recebe por construtor os controllers de navegação, seleção e câmera e o
-`SceneRegistry`. `enter`, `back` e `returnToBreadcrumb` resolvem a cena de
-destino, navegam, limpam a seleção e aplicam o preset de câmera. A validade do
+que recebe por construtor os controllers de navegação, seleção, câmera e
+layers e o `SceneRegistry`. `enter`, `back` e `returnToBreadcrumb` resolvem a
+cena de destino, navegam, limpam a seleção e aplicam o preset de câmera e as
+layers da cena. A validade do
 índice de breadcrumb vem de `breadcrumbAt`, exportada pela navegação. É o único módulo da experiência autorizado a
 importar os demais controllers; não possui estado próprio nem eventos.
+
+`create-experience.ts` é o composition root lógico: `createExperience` recebe o
+`BiologicalGraph`, o `SceneRegistry` e o nó inicial, valida nó e cena e
+constrói os quatro controllers já coerentes com a cena inicial, junto com o
+`ExperienceController` que os coordena. É o único arquivo do engine que
+depende do grafo.
+
+## LayerController
+
+`src/experience/layers` contém o `LayerControllerState` e o `LayerController`
+(ARCHITECTURE.md §13): visibilidade, transparência lógica e isolamento das
+`VisualLayer` de uma configuração, recebida no construtor e substituível por
+`applyLayers`, que recomeça do estado inicial. Depende apenas do
+tipo `VisualLayer`; não conhece SceneRegistry, capabilities nem os demais
+controllers.
 
 ## Dependências e verificação
 
 O fluxo previsto é `UI → Experience Engine → Domain` e `Rendering → Assets`.
 O ESLint existente restringe imports entre camadas, frameworks no domínio,
 referências diretas a DOM/WebGL e ciclos. `experience/navigation`,
-`experience/scenes`, `experience/camera`, `experience/selection` e
-`experience/engine` seguem as mesmas restrições de plataforma do domínio e não podem importar `content` fora
+`experience/scenes`, `experience/camera`, `experience/selection`,
+`experience/engine` e `experience/layers` seguem as mesmas restrições de
+plataforma do domínio e não podem importar `content` fora
 dos testes. Imports entre diretórios usam `@/`;
 imports locais podem usar `./`.
 
 `npm run typecheck` verifica a aplicação e também o domínio (incluindo
 `experience/navigation`, `experience/scenes`, `experience/camera`,
-`experience/selection` e `experience/engine`) com `tsconfig.domain.json`, que herda o modo strict e disponibiliza somente a
+`experience/selection`, `experience/engine` e `experience/layers`) com `tsconfig.domain.json`, que herda o modo strict e disponibiliza somente a
 biblioteca ES2022, sem tipos globais de DOM ou Node. Essa segunda compilação
 complementa o lint; os testes são compilados na configuração principal e
 executados em Node pelo Vitest.

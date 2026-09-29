@@ -15,7 +15,8 @@
     "src/experience/scenes/**/*.ts",
     "src/experience/camera/**/*.ts",
     "src/experience/selection/**/*.ts",
-    "src/experience/engine/**/*.ts"
+    "src/experience/engine/**/*.ts",
+    "src/experience/layers/**/*.ts"
   ],
   "exclude": ["node_modules", "src/**/*.test.ts"]
 }

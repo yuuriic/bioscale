@@ -56,6 +56,7 @@ const PURE_EXPERIENCE = [
   "experience/camera",
   "experience/selection",
   "experience/engine",
+  "experience/layers",
 ].map((name) => `src/${name}/**/*.{ts,tsx}`);
 
 // Camadas independentes de plataforma: além de imports, não podem tocar
